@@ -1,18 +1,22 @@
 import { neon } from "@neondatabase/serverless"
+import { sql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/neon-http"
 
 export function getDb() {
   const databaseUrl = process.env.DATABASE_URL
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is not set in environment")
   }
-  return neon(databaseUrl)
+  return drizzle(neon(databaseUrl))
 }
 
 export async function testDatabaseConnection() {
-  const sql = getDb()
-  const result = await sql`SELECT NOW() as now, version() as version`
+  const db = getDb()
+  const result = await db.execute(
+    sql`SELECT NOW() as now, version() as version`
+  )
   return {
     success: true,
-    data: result[0],
+    data: result.rows[0],
   }
 }

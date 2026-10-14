@@ -12,3 +12,15 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 - Never create branches, worktrees, or commits automatically. Only do so when the user explicitly asks for that specific action in the current request.
 - Leave changes uncommitted in the working tree on the current branch and let the user decide when and how to commit.
+
+## Database changes
+
+- Use Drizzle database push only (`npm run db:push` or `drizzle-kit push`).
+- Never generate or run database migrations.
+
+## Development data policy
+
+- This is a development project with no backwards compatibility requirements.
+- Existing data is disposable. Prefer data loss over preserving old data or compatibility.
+- Never backfill, migrate, or preserve existing rows.
+- Treat every schema change as a clean-slate reset.
