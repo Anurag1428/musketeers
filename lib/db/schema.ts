@@ -1,4 +1,5 @@
 import { index, pgTable, text, timestamp } from "drizzle-orm/pg-core"
+import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { nanoid } from "nanoid"
 
 export const bots = pgTable(
@@ -26,3 +27,9 @@ export const bots = pgTable(
 
 export type Bot = typeof bots.$inferSelect
 export type NewBot = typeof bots.$inferInsert
+
+export const insertBotSchema = createInsertSchema(bots)
+export const insertBotsSchema = insertBotSchema
+export const selectBotSchema = createSelectSchema(bots)
+export const selectBotsSchema = selectBotSchema
+

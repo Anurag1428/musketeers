@@ -67,3 +67,28 @@ thing:
 Only JavaScript and the HTTP API have a pre-10 form. The other six cores were
 released in 2026 and never had one, so any older-looking PHP, Python, Rust, Go,
 Dart or C# API attributed to DiceBear is invented rather than outdated.
+
+## Forms and Validation
+
+- **Schema and Validation**:
+  - Derive database insert schemas using `drizzle-zod` (`createInsertSchema`, `createSelectSchema`) in `lib/db/schema.ts`.
+  - Validate client forms using `react-hook-form` with `@hookform/resolvers/zod`.
+  - Server actions must validate with the Drizzle insert schema (e.g. `insertBotSchema.parse({ ...input, userId })`). Never trust the client for server-managed fields like `userId`.
+
+- **React Hook Form & React Compiler**:
+  - Use `useWatch({ control, name })` instead of `watch()` for reactive field subscriptions at component root to maintain React Compiler compatibility.
+  - Use `getValues()` (not `watch()`) inside event handlers and callbacks for imperative access to current field values.
+
+- **Component Composition (shadcn / Base UI)**:
+  - Form layout must compose `FieldGroup` + `Field` + `FieldLabel` from `@/components/ui/field`. Never use raw `div` with `space-y-*` or `grid gap-*` for form layout.
+  - Validation styling: Set `data-invalid={!!errors.field}` on `Field` and `aria-invalid={!!errors.field}` on the control (`Input`, `Textarea`). Render validation messages with `FieldError`.
+  - Option sets and presets (2–7 options) must use `ToggleGroup` + `ToggleGroupItem` from `@/components/ui/toggle-group`, not looped buttons with manual active state.
+  - Button pending states: `Button` has no `isLoading` or `isPending` prop. Compose with `<Spinner data-icon="inline-start" />` and `disabled={isSubmitting}`.
+  - Icons in buttons must use `data-icon="inline-start"` or `data-icon="inline-end"`. Do not pass sizing classes like `size-4` to icons inside components.
+  - Toasts: Use `toast.add({ title, description, type })` from `@/components/ui/toast` (Base UI uses `.add()`, not `.create()`).
+
+- **Server Actions & Auth**:
+  - Always verify session and retrieve `userId` using Clerk's `auth()` helper (`const { userId } = await auth(); if (!userId) throw new Error("Unauthorized");`).
+  - Perform mutations with Drizzle via `getDb()` from `@/lib/neon-db`.
+  - Revalidate cache with `revalidatePath(...)` after successful mutations.
+
