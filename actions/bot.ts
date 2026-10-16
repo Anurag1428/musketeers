@@ -2,7 +2,15 @@
 
 import { revalidatePath } from "next/cache"
 import { auth } from "@clerk/nextjs/server"
-import { bots, insertBotSchema } from "@/lib/db/schema"
+import { nanoid } from "nanoid"
+import {
+  bots,
+  chats,
+  chatMembers,
+  insertBotSchema,
+  insertChatSchema,
+  insertChatMemberSchema,
+} from "@/lib/db/schema"
 import { getDb } from "@/lib/neon-db"
 
 export type CreateBotInput = {
@@ -18,15 +26,35 @@ export async function createBot(input: CreateBotInput) {
     throw new Error("Unauthorized")
   }
 
-  const validatedData = insertBotSchema.parse({
+  const botId = nanoid()
+  const chatId = nanoid()
+
+  const validatedBotData = insertBotSchema.parse({
     ...input,
+    id: botId,
     userId,
   })
 
+  const validatedChatData = insertChatSchema.parse({
+    id: chatId,
+    userId,
+    kind: "direct",
+  })
+
+  const validatedMemberData = insertChatMemberSchema.parse({
+    chatId,
+    botId,
+  })
+
   const db = getDb()
-  const [newBot] = await db.insert(bots).values(validatedData).returning()
+  const [newBots] = await db.batch([
+    db.insert(bots).values(validatedBotData).returning(),
+    db.insert(chats).values(validatedChatData).returning(),
+    db.insert(chatMembers).values(validatedMemberData).returning(),
+  ])
 
   revalidatePath("/")
 
-  return newBot
+  return newBots[0]
 }
+
