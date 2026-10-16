@@ -1,33 +1,37 @@
-import { SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs"
+import { connection } from "next/server"
+import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { NeonDashboard } from "@/components/neon-dashboard"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { ChatAvatar } from "@/component/chat-avatar"
 
-export default function Page() {
+export default async function Page() {
+  await connection()
+  const seed = crypto.randomUUID()
+
   return (
-    <div className="flex min-h-svh flex-col">
-      <header className="flex items-center justify-between border-b px-6 py-4">
-        <span className="font-semibold text-base">Musketeers</span>
-        <div className="flex items-center gap-2">
-          <Show when="signed-out">
-            <SignInButton>
-              <Button variant="outline" size="sm">
-                Sign In
-              </Button>
-            </SignInButton>
-            <SignUpButton>
-              <Button size="sm">Sign Up</Button>
-            </SignUpButton>
-          </Show>
-          <Show when="signed-in">
-            <UserButton />
-          </Show>
-        </div>
-      </header>
-
-      <main className="flex flex-1 flex-col gap-8 p-6 md:p-10 max-w-5xl mx-auto w-full">
-        <NeonDashboard />
-      </main>
-    </div>
+    <main className="flex min-h-svh items-center justify-center p-4">
+      <Empty>
+        <EmptyHeader>
+          <ChatAvatar seed={seed} animated className="mb-2 size-10" />
+          <EmptyTitle>Meet your first bot</EmptyTitle>
+          <EmptyDescription>
+            Every bot gets its own personality, memory, and face. Spin one up
+            and start the conversation.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button variant="secondary">
+            <Plus data-icon="inline-start" />
+            Create a new bot
+          </Button>
+        </EmptyContent>
+      </Empty>
+    </main>
   )
 }
-
