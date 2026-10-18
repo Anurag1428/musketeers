@@ -2,23 +2,140 @@
 
 import * as React from "react"
 import { UserButton } from "@clerk/nextjs"
+import { formatDistanceToNowStrict } from "date-fns"
+import { Plus, Users } from "lucide-react"
+import { BotDialog } from "@/components/bot-dialog"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
 } from "@/components/ui/sidebar"
+import { ChatAvatar } from "@/component/chat-avatar"
+import { getUserChats, type UserChat } from "@/queries/bot"
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+export interface AppSidebarProps
+  extends React.ComponentProps<typeof Sidebar> {
+  chats?: UserChat[]
+}
+
+export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
+  const [isBotDialogOpen, setIsBotDialogOpen] = React.useState(false)
+  const [fetchedChats, setFetchedChats] = React.useState<UserChat[] | null>(null)
+
+  const chats = fetchedChats ?? initialChats ?? []
+
+  React.useEffect(() => {
+    if (initialChats === undefined) {
+      getUserChats().then(setFetchedChats).catch(() => {})
+    }
+  }, [initialChats])
+
+  const handleRefreshChats = React.useCallback(() => {
+    getUserChats().then(setFetchedChats).catch(() => {})
+  }, [])
+
   return (
     <Sidebar {...props}>
-      <SidebarHeader />
+      <SidebarHeader className="flex flex-row items-center justify-end group-data-[collapsible=icon]:justify-center">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="bg-transparent hover:bg-muted hover:text-foreground aria-expanded:bg-transparent hover:aria-expanded:bg-muted"
+              />
+            }
+          >
+            <Plus />
+            <span className="sr-only">Create</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={() => setIsBotDialogOpen(true)}
+            >
+              <Plus />
+              <span>Create new bot</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem className="cursor-pointer">
+              <Users />
+              <span>Create group chat</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <BotDialog
+          open={isBotDialogOpen}
+          onOpenChange={setIsBotDialogOpen}
+          onSuccess={handleRefreshChats}
+        />
+      </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup />
+        <SidebarGroup>
+          <SidebarGroupLabel>Chats</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {chats.map((chat) => {
+                const title = chat.name || chat.bot?.name || "Untitled"
+                const avatarSeed = chat.bot?.avatar || chat.bot?.name || chat.id
+                const timeAgo = chat.lastMessageAt
+                  ? formatDistanceToNowStrict(new Date(chat.lastMessageAt))
+                  : ""
+                const preview = chat.lastMessagePreview || ""
+
+                return (
+                  <SidebarMenuItem key={chat.id}>
+                    <SidebarMenuButton
+                      size="lg"
+                      tooltip={title}
+                      className="h-auto py-2 items-center gap-3 cursor-pointer"
+                    >
+                      <ChatAvatar
+                        seed={avatarSeed}
+                        alt={title}
+                        className="size-8 shrink-0"
+                      />
+                      <div className="flex flex-1 flex-col min-w-0 group-data-[collapsible=icon]:hidden">
+                        <div className="flex w-full items-center justify-between gap-2">
+                          <span className="truncate font-medium text-sidebar-foreground text-sm">
+                            {title}
+                          </span>
+                          {timeAgo && (
+                            <span
+                              className="shrink-0 text-xs text-muted-foreground"
+                              suppressHydrationWarning
+                            >
+                              {timeAgo}
+                            </span>
+                          )}
+                        </div>
+                        {preview && (
+                          <span className="truncate text-xs text-muted-foreground">
+                            {preview}
+                          </span>
+                        )}
+                      </div>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
         <SidebarMenu>

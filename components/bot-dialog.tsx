@@ -176,7 +176,7 @@ export function BotDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {children ? (
         <DialogTrigger render={children as React.ReactElement} />
-      ) : (
+      ) : !isControlled ? (
         <DialogTrigger
           render={
             <Button variant="secondary">
@@ -185,7 +185,7 @@ export function BotDialog({
             </Button>
           }
         />
-      )}
+      ) : null}
       <DialogContent className="sm:max-w-[480px]">
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <DialogHeader>
