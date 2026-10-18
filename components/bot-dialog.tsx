@@ -4,10 +4,20 @@ import * as React from "react"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Plus, Shuffle } from "lucide-react"
+import { Plus, Shuffle, Trash2 } from "lucide-react"
 
-import { createBot } from "@/actions/bot"
+import { createBot, deleteBot, updateBot } from "@/actions/bot"
 import { ChatAvatar } from "@/components/chat-avatar"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -73,11 +83,22 @@ const botFormSchema = z.object({
 
 export type BotFormValues = z.infer<typeof botFormSchema>
 
+export interface BotDialogBot {
+  id: string
+  name: string
+  job: string
+  avatar: string
+  instructions?: string | null
+}
+
 export interface BotDialogProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   children?: React.ReactNode
   onSuccess?: (bot: Bot) => void
+  onDelete?: (bot: Bot) => void
+  bot?: Bot | BotDialogBot | null
+  mode?: "create" | "edit"
 }
 
 export function BotDialog({
@@ -85,14 +106,24 @@ export function BotDialog({
   onOpenChange: setControlledOpen,
   children,
   onSuccess,
+  onDelete,
+  bot,
+  mode,
 }: BotDialogProps) {
+  const isEdit = mode === "edit" || (mode !== "create" && !!bot)
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
   const setOpen = isControlled ? setControlledOpen : setUncontrolledOpen
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false)
+  const [isDeleting, setIsDeleting] = React.useState(false)
+
+  const matchingInitialPreset = bot
+    ? PRESETS.find((p) => p.name === bot.name && p.job === bot.job)
+    : PRESETS[0]
 
   const [selectedPreset, setSelectedPreset] = React.useState<string>(
-    PRESETS[0].label
+    matchingInitialPreset ? matchingInitialPreset.label : ""
   )
 
   const {
@@ -107,15 +138,41 @@ export function BotDialog({
   } = useForm<BotFormValues>({
     resolver: zodResolver(botFormSchema),
     defaultValues: {
-      name: PRESETS[0].name,
-      job: PRESETS[0].job,
-      instructions: PRESETS[0].instructions,
-      avatar: "ada-seed",
+      name: bot?.name ?? PRESETS[0].name,
+      job: bot?.job ?? PRESETS[0].job,
+      instructions: bot?.instructions ?? PRESETS[0].instructions,
+      avatar: bot?.avatar ?? "ada-seed",
     },
   })
 
   // Watch avatar to update avatar preview dynamically
   const avatarSeed = useWatch({ control, name: "avatar" })
+
+  React.useEffect(() => {
+    if (open) {
+      if (isEdit && bot) {
+        reset({
+          name: bot.name,
+          job: bot.job,
+          instructions: bot.instructions ?? "",
+          avatar: bot.avatar,
+        })
+        const matching = PRESETS.find(
+          (p) => p.name === bot.name && p.job === bot.job
+        )
+        setSelectedPreset(matching ? matching.label : "")
+      } else if (!isEdit) {
+        const nextAvatar = crypto.randomUUID()
+        reset({
+          name: PRESETS[0].name,
+          job: PRESETS[0].job,
+          instructions: PRESETS[0].instructions,
+          avatar: nextAvatar,
+        })
+        setSelectedPreset(PRESETS[0].label)
+      }
+    }
+  }, [open, isEdit, bot, reset])
 
   const handleShuffle = () => {
     const newSeed = crypto.randomUUID()
@@ -137,51 +194,101 @@ export function BotDialog({
 
   const onSubmit = async (values: BotFormValues) => {
     try {
-      const newBot = await createBot({
-        name: values.name.trim(),
-        job: values.job.trim(),
-        avatar: values.avatar,
-        instructions: values.instructions?.trim() || null,
-      })
+      if (isEdit && bot?.id) {
+        const updatedBot = await updateBot({
+          id: bot.id,
+          name: values.name.trim(),
+          job: values.job.trim(),
+          avatar: values.avatar,
+          instructions: values.instructions?.trim() || null,
+        })
 
-      toast.add({
-        title: "Bot created",
-        description: `${newBot.name} was successfully created.`,
-        type: "success",
-      })
+        toast.add({
+          title: "Bot updated",
+          description: `${updatedBot.name} was successfully updated.`,
+          type: "success",
+        })
 
-      setOpen?.(false)
-      const nextAvatar = crypto.randomUUID()
-      reset({
-        name: PRESETS[0].name,
-        job: PRESETS[0].job,
-        instructions: PRESETS[0].instructions,
-        avatar: nextAvatar,
-      })
-      setSelectedPreset(PRESETS[0].label)
-      onSuccess?.(newBot)
+        setOpen?.(false)
+        onSuccess?.(updatedBot)
+      } else {
+        const newBot = await createBot({
+          name: values.name.trim(),
+          job: values.job.trim(),
+          avatar: values.avatar,
+          instructions: values.instructions?.trim() || null,
+        })
+
+        toast.add({
+          title: "Bot created",
+          description: `${newBot.name} was successfully created.`,
+          type: "success",
+        })
+
+        setOpen?.(false)
+        const nextAvatar = crypto.randomUUID()
+        reset({
+          name: PRESETS[0].name,
+          job: PRESETS[0].job,
+          instructions: PRESETS[0].instructions,
+          avatar: nextAvatar,
+        })
+        setSelectedPreset(PRESETS[0].label)
+        onSuccess?.(newBot)
+      }
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to create bot"
+        err instanceof Error
+          ? err.message
+          : isEdit
+            ? "Failed to update bot"
+            : "Failed to create bot"
       setError("root", { message })
       toast.add({
-        title: "Failed to create bot",
+        title: isEdit ? "Failed to update bot" : "Failed to create bot",
         description: message,
         type: "error",
       })
     }
   }
 
+  const handleDelete = async () => {
+    if (!bot?.id) return
+    setIsDeleting(true)
+    try {
+      const deletedBot = await deleteBot(bot.id)
+      toast.add({
+        title: "Bot deleted",
+        description: `${deletedBot.name} was successfully deleted.`,
+        type: "success",
+      })
+      setShowDeleteConfirm(false)
+      setOpen?.(false)
+      onDelete?.(deletedBot)
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete bot"
+      toast.add({
+        title: "Failed to delete bot",
+        description: message,
+        type: "error",
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
       {children ? (
         <DialogTrigger render={children as React.ReactElement} />
       ) : !isControlled ? (
         <DialogTrigger
           render={
-            <Button variant="secondary">
-              <Plus data-icon="inline-start" />
-              Create a new bot
+            <Button variant={isEdit ? "outline" : "secondary"}>
+              {!isEdit && <Plus data-icon="inline-start" />}
+              {isEdit ? "Edit bot" : "Create a new bot"}
             </Button>
           }
         />
@@ -189,9 +296,11 @@ export function BotDialog({
       <DialogContent className="sm:max-w-[480px]">
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>New bot</DialogTitle>
+            <DialogTitle>{isEdit ? "Edit bot" : "New bot"}</DialogTitle>
             <DialogDescription>
-              Give it a face, a name, and a job to do.
+              {isEdit
+                ? "Update personality, name, or instructions."
+                : "Give it a face, a name, and a job to do."}
             </DialogDescription>
           </DialogHeader>
 
@@ -199,11 +308,13 @@ export function BotDialog({
           <ToggleGroup
             variant="outline"
             size="sm"
-            value={[selectedPreset]}
+            value={selectedPreset ? [selectedPreset] : []}
             onValueChange={(val) => {
               const next = val[0]
               if (next) {
                 handleSelectPreset(next)
+              } else {
+                setSelectedPreset("")
               }
             }}
             className="flex flex-wrap gap-2 w-full"
@@ -296,24 +407,68 @@ export function BotDialog({
           )}
 
           <DialogFooter className="mt-2">
+            {isEdit && bot?.id ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={isSubmitting || isDeleting}
+                onClick={() => setShowDeleteConfirm(true)}
+                className="sm:mr-auto"
+              >
+                <Trash2 data-icon="inline-start" />
+                Delete bot
+              </Button>
+            ) : null}
             <DialogClose
               render={
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isDeleting}
                 />
               }
             >
               Cancel
             </DialogClose>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting || isDeleting}>
               {isSubmitting && <Spinner data-icon="inline-start" />}
-              Create bot
+              {isEdit ? "Save changes" : "Create bot"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+
+    {isEdit && bot?.id ? (
+      <AlertDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {bot.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete this bot and its conversation. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={handleDelete}
+            >
+              {isDeleting && <Spinner data-icon="inline-start" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    ) : null}
+  </>
   )
+}
+
+export function EditBotDialog(props: BotDialogProps) {
+  return <BotDialog mode="edit" {...props} />
 }
