@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useParams, usePathname, useRouter } from "next/navigation"
 import { UserButton } from "@clerk/nextjs"
 import { formatDistanceToNowStrict } from "date-fns"
 import { Plus, Search, Users } from "lucide-react"
@@ -47,6 +47,8 @@ import { ChatAvatar } from "@/component/chat-avatar"
 import { getUserChats, type UserChat } from "@/queries/bot"
 import { cn } from "@/lib/utils"
 
+const EMPTY_CHATS: UserChat[] = []
+
 export interface AppSidebarProps
   extends React.ComponentProps<typeof Sidebar> {
   chats?: UserChat[]
@@ -54,18 +56,31 @@ export interface AppSidebarProps
 
 export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
   const router = useRouter()
+  const params = useParams()
+  const pathname = usePathname()
   const { state } = useSidebar()
   const [isBotDialogOpen, setIsBotDialogOpen] = React.useState(false)
   const [isSearchOpen, setIsSearchOpen] = React.useState(false)
   const [fetchedChats, setFetchedChats] = React.useState<UserChat[] | null>(null)
 
-  const chats = fetchedChats ?? initialChats ?? []
+  const chats = fetchedChats ?? initialChats ?? EMPTY_CHATS
+  const activeChatId =
+    (params?.chatId as string | undefined) ??
+    (pathname?.startsWith("/chats/") ? pathname.split("/")[2] : undefined)
+
+  const activeChatRef = React.useRef<HTMLAnchorElement>(null)
 
   React.useEffect(() => {
     if (initialChats === undefined) {
       getUserChats().then(setFetchedChats).catch(() => {})
     }
   }, [initialChats])
+
+  React.useEffect(() => {
+    if (activeChatId && activeChatRef.current) {
+      activeChatRef.current.focus()
+    }
+  }, [activeChatId, chats.length])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -246,13 +261,21 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                   ? formatDistanceToNowStrict(new Date(chat.lastMessageAt))
                   : ""
                 const preview = chat.lastMessagePreview || ""
+                const isActive = chat.id === activeChatId
 
                 return (
                   <SidebarMenuItem key={chat.id}>
                     <SidebarMenuButton
                       size="lg"
                       tooltip={title}
-                      render={<Link href={`/chats/${chat.id}`} />}
+                      isActive={isActive}
+                      render={
+                        <Link
+                          ref={isActive ? activeChatRef : undefined}
+                          href={`/chats/${chat.id}`}
+                          aria-current={isActive ? "page" : undefined}
+                        />
+                      }
                       className="h-auto py-2 items-center gap-3 cursor-pointer group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center"
                     >
                       <ChatAvatar
@@ -262,7 +285,7 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                       />
                       <div className="flex flex-1 flex-col min-w-0 group-data-[collapsible=icon]:hidden">
                         <div className="flex w-full items-center justify-between gap-2">
-                          <span className="truncate font-medium text-sidebar-foreground text-sm">
+                          <span className="truncate font-medium text-sidebar-foreground group-data-active/menu-button:text-sidebar-accent-foreground text-sm">
                             {title}
                           </span>
                           {timeAgo && (
