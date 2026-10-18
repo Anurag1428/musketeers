@@ -25,6 +25,8 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import {
   Command,
@@ -52,6 +54,7 @@ export interface AppSidebarProps
 
 export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
   const router = useRouter()
+  const { state } = useSidebar()
   const [isBotDialogOpen, setIsBotDialogOpen] = React.useState(false)
   const [isSearchOpen, setIsSearchOpen] = React.useState(false)
   const [fetchedChats, setFetchedChats] = React.useState<UserChat[] | null>(null)
@@ -84,23 +87,40 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
   }, [])
 
   return (
-    <Sidebar {...props}>
+    <Sidebar collapsible="icon" {...props}>
       <SidebarHeader className="flex flex-col gap-2">
         <div className="flex flex-row items-center justify-end group-data-[collapsible=icon]:justify-center">
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="bg-transparent hover:bg-muted hover:text-foreground aria-expanded:bg-transparent hover:aria-expanded:bg-muted"
-                />
-              }
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="bg-transparent hover:bg-muted hover:text-foreground aria-expanded:bg-transparent hover:aria-expanded:bg-muted group-data-[collapsible=icon]:size-8 cursor-pointer"
+                      />
+                    }
+                  />
+                }
+              >
+                <Plus />
+                <span className="sr-only">Create</span>
+              </TooltipTrigger>
+              <TooltipContent
+                side="right"
+                align="center"
+                className="hidden group-data-[collapsible=icon]:flex items-center"
+              >
+                <span>Create</span>
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent
+              side={state === "collapsed" ? "right" : "bottom"}
+              align={state === "collapsed" ? "start" : "end"}
+              className="w-48"
             >
-              <Plus />
-              <span className="sr-only">Create</span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem
                 className="cursor-pointer"
                 onClick={() => setIsBotDialogOpen(true)}
@@ -130,7 +150,7 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
                   "hover:bg-muted hover:text-foreground dark:hover:bg-input/50",
                   "justify-between font-normal text-muted-foreground cursor-pointer shadow-none",
-                  "group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:justify-center"
+                  "group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:dark:bg-transparent! group-data-[collapsible=icon]:text-sidebar-foreground group-data-[collapsible=icon]:hover:bg-muted group-data-[collapsible=icon]:dark:hover:bg-muted/50!"
                 )}
               />
             }
@@ -218,7 +238,7 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupLabel>Chats</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-1">
               {chats.map((chat) => {
                 const title = chat.name || chat.bot?.name || "Untitled"
                 const avatarSeed = chat.bot?.avatar || chat.bot?.name || chat.id
@@ -233,7 +253,7 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                       size="lg"
                       tooltip={title}
                       render={<Link href={`/chats/${chat.id}`} />}
-                      className="h-auto py-2 items-center gap-3 cursor-pointer"
+                      className="h-auto py-2 items-center gap-3 cursor-pointer group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center"
                     >
                       <ChatAvatar
                         seed={avatarSeed}
@@ -284,7 +304,7 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
             <SidebarMenuButton
               size="lg"
               render={<div />}
-              className="cursor-pointer transition-colors"
+              className="cursor-pointer transition-colors group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center"
             >
               <UserButton
                 showName
@@ -293,7 +313,8 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                     rootBox: "!w-full !h-full !flex flex-1 items-center",
                     userButtonTrigger:
                       "!w-full !h-full !flex items-center !justify-start gap-2 !p-0 !bg-transparent !shadow-none !border-0 focus:outline-none focus-visible:ring-0 cursor-pointer group-data-[collapsible=icon]:!justify-center",
-                    userButtonBox: "!w-full !flex flex-row gap-2 items-center",
+                    userButtonBox:
+                      "!w-full !flex flex-row gap-2 items-center group-data-[collapsible=icon]:!justify-center group-data-[collapsible=icon]:!gap-0",
                     userButtonOuterIdentifier:
                       "text-sm font-medium text-sidebar-foreground group-hover/menu-button:text-sidebar-accent-foreground truncate !text-left group-data-[collapsible=icon]:hidden",
                     avatarBox: "!size-[1.5rem] !w-[1.5rem] !h-[1.5rem] shrink-0 rounded-md",
@@ -308,6 +329,7 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   )
 }
