@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import { auth } from "@clerk/nextjs/server"
 import { getChat } from "@/chats/queries"
 import { ChatHeader } from "@/components/chat-header"
+import { ChatView } from "@/components/chat-view"
 
 interface ChatPageProps {
   params: Promise<{
@@ -21,11 +22,18 @@ export default async function ChatPage({ params }: ChatPageProps) {
     notFound()
   }
 
+  const botName = chat.bot?.name || chat.name || undefined
+  const instructions = chat.bot?.instructions || undefined
+
   return (
-    <div className="flex min-h-svh flex-1 flex-col">
+    <div className="flex h-svh flex-1 flex-col overflow-hidden">
       <ChatHeader chat={chat} />
-      <main className="flex-1 p-4 sm:p-6">
-        <p className="text-muted-foreground text-sm">{chatId}</p>
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <ChatView
+          chatId={chatId}
+          botName={botName}
+          instructions={instructions}
+        />
       </main>
     </div>
   )
