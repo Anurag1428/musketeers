@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { auth } from "@clerk/nextjs/server"
 import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
+import { createBotSandbox, deleteBotSandbox } from "@/lib/daytona"
 import {
   bots,
   chats,
@@ -30,33 +31,52 @@ export async function createBot(input: CreateBotInput) {
   const botId = nanoid()
   const chatId = nanoid()
 
-  const validatedBotData = insertBotSchema.parse({
-    ...input,
-    id: botId,
-    userId,
-  })
-
-  const validatedChatData = insertChatSchema.parse({
-    id: chatId,
-    userId,
-    kind: "direct",
-  })
-
-  const validatedMemberData = insertChatMemberSchema.parse({
-    chatId,
+  // Create Daytona sandbox for this bot
+  const sandbox = await createBotSandbox({
     botId,
+    userId,
+    name: input.name,
   })
 
-  const db = getDb()
-  const [newBots] = await db.batch([
-    db.insert(bots).values(validatedBotData).returning(),
-    db.insert(chats).values(validatedChatData).returning(),
-    db.insert(chatMembers).values(validatedMemberData).returning(),
-  ])
+  try {
+    const validatedBotData = insertBotSchema.parse({
+      ...input,
+      id: botId,
+      userId,
+      sandboxId: sandbox.id,
+    })
 
-  revalidatePath("/", "layout")
+    const validatedChatData = insertChatSchema.parse({
+      id: chatId,
+      userId,
+      kind: "direct",
+    })
 
-  return newBots[0]
+    const validatedMemberData = insertChatMemberSchema.parse({
+      chatId,
+      botId,
+    })
+
+    const db = getDb()
+    const [newBots] = await db.batch([
+      db.insert(bots).values(validatedBotData).returning(),
+      db.insert(chats).values(validatedChatData).returning(),
+      db.insert(chatMembers).values(validatedMemberData).returning(),
+    ])
+
+    revalidatePath("/", "layout")
+
+    return newBots[0]
+  } catch (error) {
+    // If DB transaction fails, clean up the created sandbox to prevent orphans
+    await deleteBotSandbox(sandbox.id).catch((cleanupError) => {
+      console.error(
+        "Failed to clean up Daytona sandbox after bot creation failure:",
+        cleanupError
+      )
+    })
+    throw error
+  }
 }
 
 export type UpdateBotInput = {
@@ -132,6 +152,13 @@ export async function deleteBot(botId: string) {
     throw new Error("Bot not found or unauthorized")
   }
 
+  const deletedBot = deletedBots[0]
+
+  // Delete Daytona sandbox if present
+  if (deletedBot.sandboxId) {
+    await deleteBotSandbox(deletedBot.sandboxId)
+  }
+
   // Also clean up any direct chats that were dedicated to this bot
   if (chatIds.length > 0) {
     await db
@@ -141,6 +168,5 @@ export async function deleteBot(botId: string) {
 
   revalidatePath("/", "layout")
 
-  return deletedBots[0]
+  return deletedBot
 }
-

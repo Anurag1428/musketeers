@@ -89,6 +89,7 @@ export interface BotDialogBot {
   job: string
   avatar: string
   instructions?: string | null
+  sandboxId?: string | null
 }
 
 export interface BotDialogProps {
