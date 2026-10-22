@@ -11,6 +11,7 @@ export type UserChatBot = {
   avatar: string
   job: string
   instructions: string | null
+  sandboxId: string | null
 }
 
 export type UserChat = {
@@ -40,6 +41,7 @@ export async function getUserChats(): Promise<UserChat[]> {
         avatar: bots.avatar,
         job: bots.job,
         instructions: bots.instructions,
+        sandboxId: bots.sandboxId,
       },
     })
     .from(chats)

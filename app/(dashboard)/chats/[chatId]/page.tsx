@@ -23,7 +23,9 @@ export default async function ChatPage({ params }: ChatPageProps) {
   }
 
   const botName = chat.bot?.name || chat.name || undefined
+  const botJob = chat.bot?.job || undefined
   const instructions = chat.bot?.instructions || undefined
+  const sandboxId = chat.bot?.sandboxId || undefined
 
   return (
     <div className="flex h-svh flex-1 flex-col overflow-hidden">
@@ -32,7 +34,9 @@ export default async function ChatPage({ params }: ChatPageProps) {
         <ChatView
           chatId={chatId}
           botName={botName}
+          botJob={botJob}
           instructions={instructions}
+          sandboxId={sandboxId}
         />
       </main>
     </div>
