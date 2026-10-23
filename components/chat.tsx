@@ -24,8 +24,15 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
+  PromptInputSelect,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
+import { ChatAvatar } from "@/components/chat-avatar"
 import {
   Tool,
   ToolHeader,
@@ -52,12 +59,23 @@ import type { chatAgent } from "@/trigger/chat"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface ChatBotOption {
+  id: string
+  name: string
+  avatar?: string | null
+  job?: string | null
+  instructions?: string | null
+  sandboxId?: string | null
+}
+
 interface ChatProps {
   chatId: string
   botName?: string
   botJob?: string
   instructions?: string
   sandboxId?: string | null
+  bots?: ChatBotOption[]
+  isGroup?: boolean
 }
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart
@@ -400,15 +418,37 @@ export function Chat({
   botJob,
   instructions,
   sandboxId,
+  bots,
+  isGroup,
 }: ChatProps) {
+  const [selectedBotId, setSelectedBotId] = React.useState<string>(() => {
+    return bots?.[0]?.id ?? ""
+  })
+
+  React.useEffect(() => {
+    if (bots && bots.length > 0) {
+      setSelectedBotId((prev) => {
+        if (prev && bots.some((b) => b.id === prev)) {
+          return prev
+        }
+        return bots[0].id
+      })
+    }
+  }, [bots])
+
+  const selectedBot = React.useMemo(() => {
+    return bots?.find((b) => b.id === selectedBotId) ?? bots?.[0]
+  }, [bots, selectedBotId])
+
   const clientData = React.useMemo(
     () => ({
-      botName,
-      botJob,
-      botInstructions: instructions ?? null,
-      sandboxId: sandboxId ?? null,
+      botName: selectedBot?.name ?? botName,
+      botJob: selectedBot?.job ?? botJob,
+      botInstructions: (selectedBot?.instructions ?? instructions) ?? null,
+      sandboxId: (selectedBot?.sandboxId ?? sandboxId) ?? null,
+      selectedBotId: selectedBot?.id,
     }),
-    [botName, botJob, instructions, sandboxId]
+    [selectedBot, botName, botJob, instructions, sandboxId]
   )
 
   const transport = useTriggerChatTransport<typeof chatAgent>({
@@ -441,6 +481,10 @@ export function Chat({
       key={chatId}
       chatId={chatId}
       botName={botName}
+      bots={bots}
+      isGroup={isGroup}
+      selectedBotId={selectedBotId}
+      onSelectBotId={setSelectedBotId}
       transport={transport}
       initialMessages={initialMessages}
     />
@@ -450,11 +494,19 @@ export function Chat({
 function ChatContent({
   chatId,
   botName,
+  bots,
+  isGroup,
+  selectedBotId,
+  onSelectBotId,
   transport,
   initialMessages,
 }: {
   chatId: string
   botName?: string
+  bots?: ChatBotOption[]
+  isGroup?: boolean
+  selectedBotId: string
+  onSelectBotId: (id: string) => void
   transport: ReturnType<typeof useTriggerChatTransport<typeof chatAgent>>
   initialMessages: UIMessage[]
 }) {
@@ -465,6 +517,10 @@ function ChatContent({
     messages: initialMessages,
     resume: initialMessages.length > 0,
   })
+
+  const selectedBot = React.useMemo(() => {
+    return bots?.find((b) => b.id === selectedBotId) ?? bots?.[0]
+  }, [bots, selectedBotId])
 
   const isGenerating = status === "submitted" || status === "streaming"
 
@@ -477,7 +533,18 @@ function ChatContent({
     const text = message.text?.trim() || input.trim()
     if (!text) return
 
-    sendMessage({ text })
+    sendMessage(
+      { text },
+      {
+        metadata: {
+          selectedBotId: selectedBot?.id,
+          botName: selectedBot?.name,
+          botJob: selectedBot?.job,
+          botInstructions: selectedBot?.instructions ?? null,
+          sandboxId: selectedBot?.sandboxId ?? null,
+        },
+      }
+    )
     setInput("")
   }
 
@@ -487,8 +554,18 @@ function ChatContent({
         <ConversationContent className="mx-auto w-full max-w-3xl">
           {messages.length === 0 ? (
             <ConversationEmptyState
-              title={botName ? `Chat with ${botName}` : "Start a conversation"}
-              description="Type a message below to begin chatting."
+              title={
+                isGroup
+                  ? "Group Chat"
+                  : botName
+                  ? `Chat with ${botName}`
+                  : "Start a conversation"
+              }
+              description={
+                isGroup && selectedBot
+                  ? `Pick a bot and type a message below. Currently talking to ${selectedBot.name}.`
+                  : "Type a message below to begin chatting."
+              }
             />
           ) : (
             messages.map((message) => (
@@ -534,12 +611,55 @@ function ChatContent({
             <PromptInputTextarea
               value={input}
               placeholder={
-                botName ? `Message ${botName}...` : "Ask anything..."
+                isGroup && selectedBot
+                  ? `Message ${selectedBot.name}...`
+                  : botName
+                  ? `Message ${botName}...`
+                  : "Ask anything..."
               }
               onChange={(e) => setInput(e.target.value)}
             />
           </PromptInputBody>
-          <PromptInputFooter className="justify-end">
+          <PromptInputFooter className="justify-between items-center">
+            {isGroup && bots && bots.length > 0 ? (
+              <PromptInputTools>
+                <PromptInputSelect
+                  value={selectedBotId}
+                  onValueChange={(val) => {
+                    if (val) onSelectBotId(String(val))
+                  }}
+                >
+                  <PromptInputSelectTrigger className="h-8 gap-2 px-2.5 rounded-lg border border-input bg-transparent text-xs hover:bg-muted font-normal text-foreground">
+                    {selectedBot && (
+                      <ChatAvatar
+                        seed={selectedBot.avatar || selectedBot.name}
+                        alt={selectedBot.name}
+                        className="size-4 shrink-0 rounded-full"
+                      />
+                    )}
+                    <PromptInputSelectValue placeholder="Pick a bot">
+                      {selectedBot?.name ?? "Pick a bot"}
+                    </PromptInputSelectValue>
+                  </PromptInputSelectTrigger>
+                  <PromptInputSelectContent align="start">
+                    {bots.map((b) => (
+                      <PromptInputSelectItem key={b.id} value={b.id}>
+                        <div className="flex items-center gap-2">
+                          <ChatAvatar
+                            seed={b.avatar || b.name}
+                            alt={b.name}
+                            className="size-4 shrink-0 rounded-full"
+                          />
+                          <span className="font-medium text-xs">{b.name}</span>
+                        </div>
+                      </PromptInputSelectItem>
+                    ))}
+                  </PromptInputSelectContent>
+                </PromptInputSelect>
+              </PromptInputTools>
+            ) : (
+              <div />
+            )}
             <PromptInputSubmit
               disabled={!input.trim() && !isGenerating}
               status={status}

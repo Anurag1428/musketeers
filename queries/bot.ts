@@ -23,6 +23,7 @@ export type UserChat = {
   lastMessageAt: Date
   createdAt: Date
   bot: UserChatBot | null
+  bots: UserChatBot[]
 }
 
 export async function getUserChats(): Promise<UserChat[]> {
@@ -53,8 +54,21 @@ export async function getUserChats(): Promise<UserChat[]> {
   const chatMap = new Map<string, UserChat>()
 
   for (const row of rows) {
-    if (!chatMap.has(row.chat.id)) {
-      chatMap.set(row.chat.id, {
+    const rowBot =
+      row.bot && row.bot.id && row.bot.name && row.bot.avatar && row.bot.job
+        ? {
+            id: row.bot.id,
+            name: row.bot.name,
+            avatar: row.bot.avatar,
+            job: row.bot.job,
+            instructions: row.bot.instructions,
+            sandboxId: row.bot.sandboxId,
+          }
+        : null
+
+    let existing = chatMap.get(row.chat.id)
+    if (!existing) {
+      existing = {
         id: row.chat.id,
         userId: row.chat.userId,
         kind: row.chat.kind,
@@ -62,8 +76,13 @@ export async function getUserChats(): Promise<UserChat[]> {
         lastMessagePreview: row.chat.lastMessagePreview,
         lastMessageAt: row.chat.lastMessageAt,
         createdAt: row.chat.createdAt,
-        bot: row.bot?.id ? row.bot : null,
-      })
+        bot: rowBot,
+        bots: [],
+      }
+      chatMap.set(row.chat.id, existing)
+    }
+    if (rowBot && !existing.bots.some((b) => b.id === rowBot.id)) {
+      existing.bots.push(rowBot)
     }
   }
 

@@ -12,6 +12,7 @@ export const clientDataSchema = z.object({
   botJob: z.string().optional(),
   botInstructions: z.string().nullable().optional(),
   sandboxId: z.string().nullable().optional(),
+  selectedBotId: z.string().optional(),
 })
 
 export type ChatClientData = z.infer<typeof clientDataSchema>
@@ -61,6 +62,22 @@ export function buildAgentInstructions(params: {
     ``,
     `Always respond in character according to your role and purpose. Maintain a helpful and professional demeanor.`,
   ].join("\n")
+}
+
+async function getBotById(botId: string) {
+  try {
+    const db = getDb()
+    const rows = await db
+      .select()
+      .from(bots)
+      .where(eq(bots.id, botId))
+      .limit(1)
+
+    return rows[0] ?? null
+  } catch (error) {
+    console.error("Failed to query bot by id from database:", error)
+    return null
+  }
 }
 
 async function getBotByChatId(chatId: string) {
@@ -401,7 +418,12 @@ export const chatAgent = chat.agent({
   clientDataSchema,
   tools: async ({ clientData, chatId }) => {
     let sandboxId = clientData?.sandboxId
-    if (!sandboxId) {
+    if (clientData?.selectedBotId) {
+      const selectedBot = await getBotById(clientData.selectedBotId)
+      if (selectedBot) {
+        sandboxId = selectedBot.sandboxId
+      }
+    } else if (!sandboxId) {
       const dbBot = await getBotByChatId(chatId)
       sandboxId = dbBot?.sandboxId
     }
@@ -413,8 +435,17 @@ export const chatAgent = chat.agent({
     let purpose = clientData?.botInstructions
     let sandboxId = clientData?.sandboxId
 
-    // Fall back to database query if client data is not provided or incomplete
-    if (!name || !sandboxId) {
+    // Support bot-per-turn in group chats via transport metadata
+    if (clientData?.selectedBotId) {
+      const selectedBot = await getBotById(clientData.selectedBotId)
+      if (selectedBot) {
+        name = selectedBot.name
+        job = selectedBot.job
+        purpose = selectedBot.instructions
+        sandboxId = selectedBot.sandboxId
+      }
+    } else if (!name || !sandboxId) {
+      // Fall back to database query if client data is not provided or incomplete
       const dbBot = await getBotByChatId(chatId)
       if (dbBot) {
         name = name || dbBot.name
