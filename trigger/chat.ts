@@ -3,7 +3,7 @@ import { google } from "@ai-sdk/google"
 import { tool, isStepCount } from "ai"
 import { z } from "zod"
 import { eq } from "drizzle-orm"
-import { bots, chatMembers } from "@/lib/db/schema"
+import { bots, chatMembers, chats } from "@/lib/db/schema"
 import { getDb } from "@/lib/neon-db"
 import { getDaytonaClient } from "@/lib/daytona"
 
@@ -17,11 +17,21 @@ export const clientDataSchema = z.object({
 
 export type ChatClientData = z.infer<typeof clientDataSchema>
 
+export interface GroupBotInfo {
+  id: string
+  name: string
+  job: string
+  instructions?: string | null
+}
+
 export function buildAgentInstructions(params: {
   name?: string | null
   job?: string | null
   purpose?: string | null
   sandboxId?: string | null
+  isGroup?: boolean
+  chatName?: string | null
+  otherBots?: GroupBotInfo[]
 }): string {
   const name = params.name?.trim() || "Assistant"
   const job = params.job?.trim() || "AI Assistant"
@@ -48,6 +58,35 @@ export function buildAgentInstructions(params: {
       ].join("\n")
     : ""
 
+  let groupChatGuidance = ""
+  if (params.isGroup) {
+    const chatTitle = params.chatName?.trim() || "Group Chat"
+    const teammates = (params.otherBots || [])
+      .map(
+        (b) =>
+          `- **${b.name}** — Role: ${b.job}${
+            b.instructions ? ` | Specialty: ${b.instructions.slice(0, 200)}` : ""
+          }`
+      )
+      .join("\n")
+
+    groupChatGuidance = [
+      `# Group Chat Context`,
+      `You are a member of the group chat "${chatTitle}".`,
+      `You are currently responding as **${name}** (Role: ${job}). Always stay in your own persona.`,
+      teammates
+        ? `\nOther participating bots in this group chat:\n${teammates}`
+        : "",
+      ``,
+      `# Collaboration & Handoff Guidance`,
+      `- You have access to the \`handoff\` tool in this group chat.`,
+      `- If a user prompt, question, or task falls outside your role (${job}) or purpose, or is clearly better suited for one of your teammates above, invoke the \`handoff\` tool to transfer the task to that bot.`,
+      `- When calling \`handoff\`, provide the teammate bot's name and a clear explanation of why they are the right specialist for the request.`,
+      `- After the \`handoff\` tool runs, tell the user in your message that you have handed the task over to that bot and briefly explain why, inviting them to continue with that teammate.`,
+      `- If the user's prompt matches your expertise or is general enough for you to handle, answer it directly without calling \`handoff\`.`,
+    ].join("\n")
+  }
+
   return [
     `# Identity & Role`,
     `You are ${name}.`,
@@ -59,6 +98,7 @@ export function buildAgentInstructions(params: {
     `# Environment`,
     sandboxInfo,
     computerUseGuidance ? `\n${computerUseGuidance}` : "",
+    groupChatGuidance ? `\n${groupChatGuidance}` : "",
     ``,
     `Always respond in character according to your role and purpose. Maintain a helpful and professional demeanor.`,
   ].join("\n")
@@ -80,21 +120,107 @@ async function getBotById(botId: string) {
   }
 }
 
-async function getBotByChatId(chatId: string) {
+async function getChatBots(chatId: string): Promise<{
+  chat: typeof chats.$inferSelect | null
+  bots: (typeof bots.$inferSelect)[]
+}> {
   try {
     const db = getDb()
-    const rows = await db
-      .select({ bot: bots })
-      .from(chatMembers)
-      .innerJoin(bots, eq(chatMembers.botId, bots.id))
-      .where(eq(chatMembers.chatId, chatId))
-      .limit(1)
+    const [chatRows, memberRows] = await Promise.all([
+      db.select().from(chats).where(eq(chats.id, chatId)).limit(1),
+      db
+        .select({ bot: bots })
+        .from(chatMembers)
+        .innerJoin(bots, eq(chatMembers.botId, bots.id))
+        .where(eq(chatMembers.chatId, chatId)),
+    ])
 
-    return rows[0]?.bot ?? null
+    return {
+      chat: chatRows[0] ?? null,
+      bots: memberRows.map((r) => r.bot),
+    }
   } catch (error) {
-    console.error("Failed to query bot by chatId from database:", error)
-    return null
+    console.error("Failed to query chat bots from database:", error)
+    return { chat: null, bots: [] }
   }
+}
+
+async function getBotByChatId(chatId: string) {
+  const { bots: chatBots } = await getChatBots(chatId)
+  return chatBots[0] ?? null
+}
+
+function makeHandoffTool(
+  memberBots: (typeof bots.$inferSelect)[],
+  currentBotId?: string
+) {
+  const eligibleBots = currentBotId
+    ? memberBots.filter((b) => b.id !== currentBotId)
+    : memberBots
+
+  const botDescriptions = (eligibleBots.length > 0 ? eligibleBots : memberBots)
+    .map(
+      (b) =>
+        `• Name: "${b.name}" (ID: "${b.id}") | Role: ${b.job}${
+          b.instructions ? ` | Specialty: ${b.instructions.slice(0, 150)}` : ""
+        }`
+    )
+    .join("\n")
+
+  return tool({
+    description: `Transfer or hand off the user's task to another bot in this group chat who specializes in the required topic.
+Use this tool when the user's request falls outside your domain or is better suited for a teammate.
+Available teammate bots:
+${botDescriptions}`,
+    inputSchema: z.object({
+      targetBot: z
+        .string()
+        .describe(
+          "The exact name or ID of the bot to hand off to from the available teammate bots list"
+        ),
+      reason: z
+        .string()
+        .describe(
+          "Clear explanation of why this bot is better suited to handle the user's prompt"
+        ),
+    }),
+    execute: async ({ targetBot, reason }) => {
+      const cleanTarget = targetBot.trim().toLowerCase()
+      const target = memberBots.find(
+        (b) =>
+          b.id.toLowerCase() === cleanTarget ||
+          b.name.toLowerCase() === cleanTarget ||
+          b.name.toLowerCase().includes(cleanTarget) ||
+          cleanTarget.includes(b.name.toLowerCase())
+      )
+
+      if (!target) {
+        return {
+          success: false,
+          error: `Bot "${targetBot}" not found in this group chat. Available bots are: ${memberBots
+            .map((b) => b.name)
+            .join(", ")}.`,
+        }
+      }
+
+      if (currentBotId && target.id === currentBotId) {
+        return {
+          success: false,
+          error: `You are already ${target.name}. Hand off to another member bot if needed, or answer directly.`,
+        }
+      }
+
+      return {
+        success: true,
+        targetBotId: target.id,
+        targetBotName: target.name,
+        targetBotAvatar: target.avatar,
+        targetBotJob: target.job,
+        reason,
+        message: `Successfully handed off to ${target.name} (${target.job}).`,
+      }
+    },
+  })
 }
 
 /**
@@ -417,52 +543,95 @@ export const chatAgent = chat.agent({
   id: "chat",
   clientDataSchema,
   tools: async ({ clientData, chatId }) => {
+    const { chat: currentChat, bots: memberBots } = await getChatBots(chatId)
+
+    let currentBotId = clientData?.selectedBotId
     let sandboxId = clientData?.sandboxId
-    if (clientData?.selectedBotId) {
-      const selectedBot = await getBotById(clientData.selectedBotId)
+
+    if (currentBotId) {
+      const selectedBot =
+        memberBots.find((b) => b.id === currentBotId) ||
+        (await getBotById(currentBotId))
       if (selectedBot) {
         sandboxId = selectedBot.sandboxId
       }
-    } else if (!sandboxId) {
-      const dbBot = await getBotByChatId(chatId)
-      sandboxId = dbBot?.sandboxId
+    } else if (!sandboxId && memberBots.length > 0) {
+      sandboxId = memberBots[0]?.sandboxId
+      currentBotId = memberBots[0]?.id
     }
-    return sandboxId ? makeSandboxTools(sandboxId) : {}
+
+    const sandboxTools = sandboxId ? makeSandboxTools(sandboxId) : {}
+    const isGroup = currentChat?.kind === "group" || memberBots.length > 1
+
+    if (isGroup && memberBots.length > 1) {
+      return {
+        ...sandboxTools,
+        handoff: makeHandoffTool(memberBots, currentBotId),
+      }
+    }
+
+    return sandboxTools
   },
   run: async ({ messages, signal, streamText, chatId, clientData, tools }) => {
+    const { chat: currentChat, bots: memberBots } = await getChatBots(chatId)
+
     let name = clientData?.botName
     let job = clientData?.botJob
     let purpose = clientData?.botInstructions
     let sandboxId = clientData?.sandboxId
+    let currentBotId = clientData?.selectedBotId
 
     // Support bot-per-turn in group chats via transport metadata
-    if (clientData?.selectedBotId) {
-      const selectedBot = await getBotById(clientData.selectedBotId)
+    if (currentBotId) {
+      const selectedBot =
+        memberBots.find((b) => b.id === currentBotId) ||
+        (await getBotById(currentBotId))
       if (selectedBot) {
         name = selectedBot.name
         job = selectedBot.job
         purpose = selectedBot.instructions
         sandboxId = selectedBot.sandboxId
       }
-    } else if (!name || !sandboxId) {
-      // Fall back to database query if client data is not provided or incomplete
-      const dbBot = await getBotByChatId(chatId)
-      if (dbBot) {
-        name = name || dbBot.name
-        job = job || dbBot.job
-        purpose = purpose ?? dbBot.instructions
-        sandboxId = sandboxId ?? dbBot.sandboxId
-      }
+    } else if (memberBots.length > 0) {
+      const firstBot = memberBots[0]
+      name = name || firstBot.name
+      job = job || firstBot.job
+      purpose = purpose ?? firstBot.instructions
+      sandboxId = sandboxId ?? firstBot.sandboxId
+      currentBotId = firstBot.id
     }
+
+    const isGroup = currentChat?.kind === "group" || memberBots.length > 1
+    const otherBots = isGroup
+      ? memberBots
+          .filter((b) => b.id !== currentBotId)
+          .map((b) => ({
+            id: b.id,
+            name: b.name,
+            job: b.job,
+            instructions: b.instructions,
+          }))
+      : []
 
     const instructions = buildAgentInstructions({
       name,
       job,
       purpose,
       sandboxId,
+      isGroup,
+      chatName: currentChat?.name,
+      otherBots,
     })
 
     chat.prompt.set(instructions)
+
+    chat.setUIMessageStreamOptions({
+      messageMetadata: () => ({
+        selectedBotId: currentBotId,
+        botName: name,
+        botAvatar: memberBots.find((b) => b.id === currentBotId)?.avatar,
+      }),
+    })
 
     return streamText({
       model: google("gemini-3.5-flash-lite"),
