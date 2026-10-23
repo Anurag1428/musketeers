@@ -9,6 +9,8 @@ import {
 import type { UIMessage, ToolUIPart, DynamicToolUIPart } from "ai"
 import { ArrowRightLeft, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "cn"
 import {
   Conversation,
   ConversationContent,
@@ -718,6 +720,51 @@ function ChatContent({
     [bots, messages, selectedBot]
   )
 
+  const getUserTargetBot = React.useCallback(
+    (message: UIMessage, index: number) => {
+      // 1. Direct metadata on user message
+      const meta = (message as unknown as { metadata?: Record<string, unknown> }).metadata
+      const metaBotId = (meta?.selectedBotId || meta?.botId) as string | undefined
+      if (metaBotId && bots) {
+        const found = bots.find((b) => b.id === metaBotId)
+        if (found) return found
+      }
+      if (meta?.botName && typeof meta.botName === "string") {
+        const found = bots?.find((b) => b.name === meta.botName)
+        if (found) return found
+        return {
+          id: metaBotId || meta.botName,
+          name: meta.botName,
+          avatar: (meta.botAvatar as string) || meta.botName,
+        }
+      }
+
+      // 2. Look forward at the assistant response answering this user message
+      for (let i = index + 1; i < messages.length; i++) {
+        const nextMsg = messages[i]
+        if (nextMsg) {
+          if (nextMsg.role === "assistant") {
+            const nextMeta = (nextMsg as unknown as { metadata?: Record<string, unknown> }).metadata
+            const nextBotId = (nextMeta?.selectedBotId || nextMeta?.botId) as string | undefined
+            if (nextBotId && bots) {
+              const found = bots.find((b) => b.id === nextBotId)
+              if (found) return found
+            }
+            if (nextMeta?.botName && typeof nextMeta.botName === "string") {
+              const found = bots?.find((b) => b.name === nextMeta.botName)
+              if (found) return found
+            }
+          }
+          break
+        }
+      }
+
+      // 3. Fallback to currently selected bot or first bot in group
+      return selectedBot || bots?.[0] || null
+    },
+    [bots, messages, selectedBot]
+  )
+
   const isGenerating = status === "submitted" || status === "streaming"
 
   const handleStop = React.useCallback(() => {
@@ -735,6 +782,7 @@ function ChatContent({
         metadata: {
           selectedBotId: selectedBot?.id,
           botName: selectedBot?.name,
+          botAvatar: selectedBot?.avatar,
           botJob: selectedBot?.job,
           botInstructions: selectedBot?.instructions ?? null,
           sandboxId: selectedBot?.sandboxId ?? null,
@@ -770,6 +818,17 @@ function ChatContent({
                 isGroup && isAssistant
                   ? getMessageBot(message, messageIndex)
                   : null
+              const userTargetBot =
+                isGroup && !isAssistant
+                  ? getUserTargetBot(message, messageIndex)
+                  : null
+              const hasNewlines =
+                !isAssistant &&
+                Boolean(
+                  message.parts?.some(
+                    (p) => p.type === "text" && p.text?.includes("\n")
+                  )
+                )
 
               return (
                 <Message from={message.role} key={message.id}>
@@ -820,13 +879,42 @@ function ChatContent({
                       </div>
                     </div>
                   ) : (
-                    <MessageContent>
+                    <MessageContent
+                      className={
+                        isGroup && userTargetBot
+                          ? hasNewlines
+                            ? "group-[.is-user]:flex-row group-[.is-user]:items-start group-[.is-user]:gap-2.5 group-[.is-user]:py-2.5 group-[.is-user]:px-3.5"
+                            : "group-[.is-user]:flex-row group-[.is-user]:items-center group-[.is-user]:gap-2.5 group-[.is-user]:py-2 group-[.is-user]:px-3.5"
+                          : undefined
+                      }
+                    >
+                      {isGroup && userTargetBot && (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "h-6.5 shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-black/25 dark:bg-black/40 border border-border/70 text-foreground text-xs font-semibold shadow-2xs select-none",
+                            hasNewlines && "mt-0.5"
+                          )}
+                        >
+                          <ChatAvatar
+                            seed={userTargetBot.avatar || userTargetBot.name}
+                            alt={userTargetBot.name}
+                            className="size-3.5 shrink-0 rounded-full"
+                          />
+                          <span className="truncate max-w-[160px] font-medium leading-none">
+                            {userTargetBot.name}
+                          </span>
+                        </Badge>
+                      )}
                       {message.parts?.map((part, i) => {
                         if (part.type === "text") {
                           return (
-                            <MessageResponse key={`${message.id}-${i}`}>
-                              {part.text}
-                            </MessageResponse>
+                            <span
+                              key={`${message.id}-${i}`}
+                              className="text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0"
+                            >
+                              {part.text.replace(/^\n+/, "")}
+                            </span>
                           )
                         }
 
