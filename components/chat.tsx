@@ -482,8 +482,8 @@ function ChatContent({
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden">
-      <Conversation className="flex-1">
+    <div className="flex h-full flex-1 flex-col overflow-hidden min-h-0">
+      <Conversation className="flex-1 min-h-0">
         <ConversationContent className="mx-auto w-full max-w-3xl">
           {messages.length === 0 ? (
             <ConversationEmptyState
@@ -528,7 +528,7 @@ function ChatContent({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="mx-auto w-full max-w-3xl p-4">
+      <div className="mx-auto w-full max-w-3xl p-4 shrink-0">
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
