@@ -7,6 +7,7 @@ import { UserButton } from "@clerk/nextjs"
 import { formatDistanceToNowStrict } from "date-fns"
 import { Plus, Search, Users } from "lucide-react"
 import { BotDialog } from "@/components/bot-dialog"
+import { GroupChatDialog } from "@/components/group-chat-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -43,7 +44,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { ChatAvatar } from "@/component/chat-avatar"
+import { ChatAvatar } from "@/components/chat-avatar"
+import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { getUserChats, type UserChat } from "@/queries/bot"
 import { cn } from "@/lib/utils"
 
@@ -60,6 +62,7 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
   const pathname = usePathname()
   const { state } = useSidebar()
   const [isBotDialogOpen, setIsBotDialogOpen] = React.useState(false)
+  const [isGroupChatDialogOpen, setIsGroupChatDialogOpen] = React.useState(false)
   const [isSearchOpen, setIsSearchOpen] = React.useState(false)
   const [fetchedChats, setFetchedChats] = React.useState<UserChat[] | null>(null)
 
@@ -143,7 +146,10 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                 <Plus />
                 <span>Create new bot</span>
               </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
+              <DropdownMenuItem
+                className="cursor-pointer"
+                onClick={() => setIsGroupChatDialogOpen(true)}
+              >
                 <Users />
                 <span>Create group chat</span>
               </DropdownMenuItem>
@@ -153,6 +159,14 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
             open={isBotDialogOpen}
             onOpenChange={setIsBotDialogOpen}
             onSuccess={handleRefreshChats}
+          />
+          <GroupChatDialog
+            open={isGroupChatDialogOpen}
+            onOpenChange={setIsGroupChatDialogOpen}
+            onSuccess={(chat) => {
+              handleRefreshChats()
+              router.push(`/chats/${chat.id}`)
+            }}
           />
         </div>
         <Tooltip>
@@ -199,8 +213,12 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
               <CommandEmpty>No chats found.</CommandEmpty>
               <CommandGroup heading="Chats">
                 {chats.map((chat) => {
-                  const title = chat.name || chat.bot?.name || "Untitled"
-                  const avatarSeed = chat.bot?.avatar || chat.bot?.name || chat.id
+                  const isGroup = chat.kind === "group"
+                  const title =
+                    chat.name ||
+                    (isGroup ? "Group Chat" : chat.bot?.name || "Untitled")
+                  const avatarSeed =
+                    chat.bot?.avatar || chat.bot?.name || chat.id
                   const timeAgo = chat.lastMessageAt
                     ? formatDistanceToNowStrict(new Date(chat.lastMessageAt))
                     : ""
@@ -216,11 +234,19 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                       }}
                       className="cursor-pointer gap-3 py-2"
                     >
-                      <ChatAvatar
-                        seed={avatarSeed}
-                        alt={title}
-                        className="size-8 shrink-0"
-                      />
+                      {isGroup ? (
+                        <GroupChatAvatar
+                          bots={chat.bots}
+                          alt={title}
+                          className="size-8 shrink-0"
+                        />
+                      ) : (
+                        <ChatAvatar
+                          seed={avatarSeed}
+                          alt={title}
+                          className="size-8 shrink-0"
+                        />
+                      )}
                       <div className="flex flex-1 flex-col min-w-0">
                         <div className="flex w-full items-center justify-between gap-2">
                           <span className="truncate font-medium text-sm">
@@ -255,8 +281,12 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu className="gap-1">
               {chats.map((chat) => {
-                const title = chat.name || chat.bot?.name || "Untitled"
-                const avatarSeed = chat.bot?.avatar || chat.bot?.name || chat.id
+                const isGroup = chat.kind === "group"
+                const title =
+                  chat.name ||
+                  (isGroup ? "Group Chat" : chat.bot?.name || "Untitled")
+                const avatarSeed =
+                  chat.bot?.avatar || chat.bot?.name || chat.id
                 const timeAgo = chat.lastMessageAt
                   ? formatDistanceToNowStrict(new Date(chat.lastMessageAt))
                   : ""
@@ -278,11 +308,19 @@ export function AppSidebar({ chats: initialChats, ...props }: AppSidebarProps) {
                       }
                       className="h-auto py-2 items-center gap-3 cursor-pointer group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center"
                     >
-                      <ChatAvatar
-                        seed={avatarSeed}
-                        alt={title}
-                        className="size-8 shrink-0"
-                      />
+                      {isGroup ? (
+                        <GroupChatAvatar
+                          bots={chat.bots}
+                          alt={title}
+                          className="size-8 shrink-0"
+                        />
+                      ) : (
+                        <ChatAvatar
+                          seed={avatarSeed}
+                          alt={title}
+                          className="size-8 shrink-0"
+                        />
+                      )}
                       <div className="flex flex-1 flex-col min-w-0 group-data-[collapsible=icon]:hidden">
                         <div className="flex w-full items-center justify-between gap-2">
                           <span className="truncate font-medium text-sidebar-foreground group-data-active/menu-button:text-sidebar-accent-foreground text-sm">

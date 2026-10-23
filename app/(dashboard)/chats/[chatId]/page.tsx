@@ -29,12 +29,26 @@ export default async function ChatPage({
 
   const { chatId } = await params
   const { desktop } = (await searchParams) ?? {}
-  const isDesktopOpen = desktop === "true" || desktop === ""
   const chat = await getChat(chatId)
 
   if (!chat) {
     notFound()
   }
+
+  const isGroup = chat.kind === "group"
+  const isDesktopOpen = !isGroup && (desktop === "true" || desktop === "")
+
+  const chatBots = chat.members
+    .map((m) => m.bot)
+    .filter((b): b is NonNullable<typeof b> => Boolean(b))
+    .map((b) => ({
+      id: b.id,
+      name: b.name,
+      avatar: b.avatar,
+      job: b.job,
+      instructions: b.instructions,
+      sandboxId: b.sandboxId,
+    }))
 
   const botName = chat.bot?.name || chat.name || undefined
   const botJob = chat.bot?.job || undefined
@@ -59,6 +73,8 @@ export default async function ChatPage({
               botJob={botJob}
               instructions={instructions}
               sandboxId={sandboxId}
+              bots={chatBots}
+              isGroup={isGroup}
             />
           </main>
         </div>
