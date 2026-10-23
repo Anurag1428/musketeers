@@ -7,6 +7,8 @@ import {
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage, ToolUIPart, DynamicToolUIPart } from "ai"
+import { ArrowRightLeft, Check } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   Conversation,
   ConversationContent,
@@ -273,16 +275,141 @@ function ShowScreenToolPart({ part }: { part: ToolUIPart }) {
   )
 }
 
+function HandoffToolPart({
+  part,
+  bots,
+  selectedBotId,
+  onSelectBotId,
+}: {
+  part: ToolUIPart
+  bots?: ChatBotOption[]
+  selectedBotId?: string
+  onSelectBotId?: (id: string) => void
+}) {
+  const isReady = part.state === "output-available"
+  const isError: boolean =
+    part.state === "output-error" ||
+    Boolean(
+      isReady &&
+        part.output &&
+        typeof part.output === "object" &&
+        !(part.output as { success?: boolean }).success
+    )
+
+  const input =
+    part.input && typeof part.input === "object"
+      ? (part.input as { targetBot?: string; reason?: string })
+      : {}
+
+  const output =
+    part.output && typeof part.output === "object"
+      ? (part.output as {
+          success?: boolean
+          targetBotId?: string
+          targetBotName?: string
+          targetBotAvatar?: string
+          targetBotJob?: string
+          reason?: string
+          error?: string
+          message?: string
+        })
+      : {}
+
+  const targetName: string = output.targetBotName || input.targetBot || "Teammate"
+  const targetBot = bots?.find(
+    (b) =>
+      (output.targetBotId && b.id === output.targetBotId) ||
+      b.name.toLowerCase() === targetName.toLowerCase()
+  )
+  const targetBotId = output.targetBotId || targetBot?.id
+  const targetAvatar = output.targetBotAvatar || targetBot?.avatar || targetName
+  const targetJob = output.targetBotJob || targetBot?.job
+  const reason: string | undefined = output.reason || input.reason
+  const isCurrent = Boolean(targetBotId && selectedBotId === targetBotId)
+
+  return (
+    <div className="my-2 rounded-xl border border-border/80 bg-muted/40 p-3.5 shadow-sm transition-all">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <ArrowRightLeft className="size-3.5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-semibold text-foreground">
+                Handoff suggested
+              </span>
+              <span className="text-xs text-muted-foreground">→</span>
+              <div className="flex items-center gap-1.5">
+                <ChatAvatar
+                  seed={targetAvatar}
+                  alt={targetName}
+                  className="size-4 shrink-0 rounded-full"
+                />
+                <span className="text-xs font-medium text-foreground">
+                  {targetName}
+                </span>
+                {targetJob && (
+                  <span className="text-[0.7rem] text-muted-foreground">
+                    ({targetJob})
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {targetBotId && onSelectBotId ? (
+          <Button
+            type="button"
+            variant={isCurrent ? "secondary" : "default"}
+            size="xs"
+            onClick={() => onSelectBotId(targetBotId)}
+            className="shrink-0"
+          >
+            {isCurrent ? (
+              <>
+                <Check data-icon="inline-start" />
+                Speaking
+              </>
+            ) : (
+              `Talk to ${targetName}`
+            )}
+          </Button>
+        ) : null}
+      </div>
+
+      {reason ? (
+        <p className="mt-2 text-xs text-muted-foreground border-l-2 border-primary/40 pl-2.5 py-0.5 italic">
+          &ldquo;{reason}&rdquo;
+        </p>
+      ) : null}
+
+      {isError ? (
+        <p className="mt-2 text-xs text-destructive">
+          {output.error || part.errorText || "Handoff failed"}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 // ─── Tool Part Dispatcher ─────────────────────────────────────────────────────
 
 function ToolPartRenderer({
   part,
   messageId,
   index,
+  bots,
+  selectedBotId,
+  onSelectBotId,
 }: {
   part: AnyToolPart
   messageId: string
   index: number
+  bots?: ChatBotOption[]
+  selectedBotId?: string
+  onSelectBotId?: (id: string) => void
 }) {
   const key = `${messageId}-tool-${index}`
   const toolName = getToolName(part)
@@ -381,6 +508,28 @@ function ToolPartRenderer({
           part={part}
           title="keyboard_press"
           showOutput={false}
+        />
+      )
+
+    case "handoff":
+      return (
+        <HandoffToolPart
+          key={key}
+          part={part}
+          bots={bots}
+          selectedBotId={selectedBotId}
+          onSelectBotId={onSelectBotId}
+        />
+      )
+
+    case "handoff":
+      return (
+        <HandoffToolPart
+          key={key}
+          part={part}
+          bots={bots}
+          selectedBotId={selectedBotId}
+          onSelectBotId={onSelectBotId}
         />
       )
 
@@ -522,6 +671,53 @@ function ChatContent({
     return bots?.find((b) => b.id === selectedBotId) ?? bots?.[0]
   }, [bots, selectedBotId])
 
+    const getMessageBot = React.useCallback(
+    (message: UIMessage, index: number) => {
+      // 1. Direct metadata on assistant message
+      const meta = (message as unknown as { metadata?: Record<string, unknown> }).metadata
+      const metaBotId = (meta?.selectedBotId || meta?.botId) as string | undefined
+      if (metaBotId && bots) {
+        const found = bots.find((b) => b.id === metaBotId)
+        if (found) return found
+      }
+      if (meta?.botName && typeof meta.botName === "string") {
+        const found = bots?.find((b) => b.name === meta.botName)
+        if (found) return found
+        return {
+          id: metaBotId || meta.botName,
+          name: meta.botName,
+          avatar: (meta.botAvatar as string) || meta.botName,
+        }
+      }
+
+      // 2. Look backwards for the user message that prompted this response
+      for (let i = index - 1; i >= 0; i--) {
+        const prevMsg = messages[i]
+        if (prevMsg && prevMsg.role === "user") {
+          const prevMeta = (prevMsg as unknown as { metadata?: Record<string, unknown> }).metadata
+          const prevBotId = (prevMeta?.selectedBotId || prevMeta?.botId) as string | undefined
+          if (prevBotId && bots) {
+            const found = bots.find((b) => b.id === prevBotId)
+            if (found) return found
+          }
+          if (prevMeta?.botName && typeof prevMeta.botName === "string") {
+            const found = bots?.find((b) => b.name === prevMeta.botName)
+            if (found) return found
+          }
+          break
+        }
+      }
+
+      // 3. Fallback to latest in-flight / selected bot
+      if (index === messages.length - 1 && selectedBot) {
+        return selectedBot
+      }
+
+      return selectedBot || bots?.[0] || null
+    },
+    [bots, messages, selectedBot]
+  )
+
   const isGenerating = status === "submitted" || status === "streaming"
 
   const handleStop = React.useCallback(() => {
@@ -568,38 +764,97 @@ function ChatContent({
               }
             />
           ) : (
-            messages.map((message) => (
-              <Message from={message.role} key={message.id}>
-                <MessageContent>
-                  {message.parts?.map((part, i) => {
-                    if (part.type === "text") {
-                      return (
-                        <MessageResponse key={`${message.id}-${i}`}>
-                          {part.text}
-                        </MessageResponse>
-                      )
-                    }
+            messages.map((message, messageIndex) => {
+              const isAssistant = message.role === "assistant"
+              const messageBot =
+                isGroup && isAssistant
+                  ? getMessageBot(message, messageIndex)
+                  : null
 
-                    // Render tool call parts (type starts with "tool-" or is "dynamic-tool")
-                    if (
-                      part.type.startsWith("tool-") ||
-                      part.type === "dynamic-tool"
-                    ) {
-                      return (
-                        <ToolPartRenderer
-                          key={`${message.id}-${i}`}
-                          part={part as AnyToolPart}
-                          messageId={message.id}
-                          index={i}
-                        />
-                      )
-                    }
+              return (
+                <Message from={message.role} key={message.id}>
+                  {isGroup && isAssistant ? (
+                    <div className="flex items-start gap-3 w-full">
+                      <ChatAvatar
+                        seed={messageBot?.avatar || messageBot?.name || "bot"}
+                        alt={messageBot?.name || "Bot"}
+                        className="size-8 shrink-0 rounded-full mt-0.5"
+                      />
+                      <div className="flex flex-col min-w-0 flex-1">
+                        {messageBot?.name && (
+                          <span className="text-xs font-semibold text-muted-foreground mb-1 select-none">
+                            {messageBot.name}
+                          </span>
+                        )}
+                        <MessageContent>
+                          {message.parts?.map((part, i) => {
+                            if (part.type === "text") {
+                              return (
+                                <MessageResponse key={`${message.id}-${i}`}>
+                                  {part.text}
+                                </MessageResponse>
+                              )
+                            }
 
-                    return null
-                  })}
-                </MessageContent>
-              </Message>
-            ))
+                            // Render tool call parts (type starts with "tool-" or is "dynamic-tool")
+                            if (
+                              part.type.startsWith("tool-") ||
+                              part.type === "dynamic-tool"
+                            ) {
+                              return (
+                                <ToolPartRenderer
+                                  key={`${message.id}-${i}`}
+                                  part={part as AnyToolPart}
+                                  messageId={message.id}
+                                  index={i}
+                                  bots={bots}
+                                  selectedBotId={selectedBotId}
+                                  onSelectBotId={onSelectBotId}
+                                />
+                              )
+                            }
+
+                            return null
+                          })}
+                        </MessageContent>
+                      </div>
+                    </div>
+                  ) : (
+                    <MessageContent>
+                      {message.parts?.map((part, i) => {
+                        if (part.type === "text") {
+                          return (
+                            <MessageResponse key={`${message.id}-${i}`}>
+                              {part.text}
+                            </MessageResponse>
+                          )
+                        }
+
+                        // Render tool call parts (type starts with "tool-" or is "dynamic-tool")
+                        if (
+                          part.type.startsWith("tool-") ||
+                          part.type === "dynamic-tool"
+                        ) {
+                          return (
+                            <ToolPartRenderer
+                              key={`${message.id}-${i}`}
+                              part={part as AnyToolPart}
+                              messageId={message.id}
+                              index={i}
+                              bots={bots}
+                              selectedBotId={selectedBotId}
+                              onSelectBotId={onSelectBotId}
+                            />
+                          )
+                        }
+
+                        return null
+                      })}
+                    </MessageContent>
+                  )}
+                </Message>
+              )
+            })
           )}
         </ConversationContent>
         <ConversationScrollButton />
