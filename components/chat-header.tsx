@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Monitor } from "lucide-react"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { BotDialog, type BotDialogBot } from "@/components/bot-dialog"
@@ -30,10 +30,39 @@ export interface ChatHeaderProps {
       } | null
     }> | null
   }
+  isDesktopOpen?: boolean
+  onToggleDesktop?: () => void
 }
 
-export function ChatHeader({ chat }: ChatHeaderProps) {
+export function ChatHeader({
+  chat,
+  isDesktopOpen: isDesktopOpenProp,
+  onToggleDesktop,
+}: ChatHeaderProps) {
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  const isDesktop =
+    isDesktopOpenProp ??
+    (searchParams.get("desktop") === "true" || searchParams.has("desktop"))
+
+  const handleToggleDesktop = () => {
+    if (onToggleDesktop) {
+      onToggleDesktop()
+      return
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString())
+    if (isDesktop) {
+      nextParams.delete("desktop")
+    } else {
+      nextParams.set("desktop", "true")
+    }
+    const query = nextParams.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }
+
   const firstMember = chat.members?.[0]
   const initialBot = firstMember?.bot ?? chat.bot
   const [currentBot, setCurrentBot] = React.useState(initialBot)
@@ -68,7 +97,7 @@ export function ChatHeader({ chat }: ChatHeaderProps) {
   }
 
   return (
-    <header className="flex h-14 items-center justify-between border-b px-4 sm:px-6">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b px-4 sm:px-6">
       {editableBot ? (
         <BotDialog
           bot={editableBot}
@@ -103,9 +132,12 @@ export function ChatHeader({ chat }: ChatHeaderProps) {
       )}
       <div className="flex items-center gap-2">
         <Button
-          variant="ghost"
+          variant={isDesktop ? "secondary" : "ghost"}
           size="icon-sm"
           type="button"
+          onClick={handleToggleDesktop}
+          aria-expanded={isDesktop}
+          aria-label="Toggle desktop panel"
           className="cursor-pointer"
         >
           <Monitor />
