@@ -20,17 +20,31 @@ export interface CreateBotSandboxParams {
 }
 
 /**
- * Creates an isolated cloud sandbox for a bot.
- * Note: Does not start or invoke the sandbox.
+ * Creates an isolated cloud sandbox for a bot and initializes a blank Memory.md file.
  */
 export async function createBotSandbox(params: CreateBotSandboxParams) {
   const daytona = getDaytonaClient()
-  return await daytona.create({
+  const sandbox = await daytona.create({
     labels: {
       botId: params.botId,
       userId: params.userId,
     },
   })
+
+  // Create a blank Memory.md file in bot's sandbox on creation
+  try {
+    if (sandbox.state !== "started") {
+      await sandbox.start()
+    }
+    await sandbox.fs.uploadFile(Buffer.from(""), "Memory.md")
+  } catch (error) {
+    console.error(
+      "Failed to create blank Memory.md in sandbox on creation:",
+      error
+    )
+  }
+
+  return sandbox
 }
 
 /**
