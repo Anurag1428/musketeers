@@ -8,6 +8,7 @@ import {
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage, ToolUIPart, DynamicToolUIPart } from "ai"
 import { ArrowRightLeft, Check } from "lucide-react"
+import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
 import {
   Conversation,
@@ -179,7 +180,7 @@ function BashToolPart({ part }: { part: ToolUIPart }) {
       <ToolContent>
         {command && (
           <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
               Command
             </p>
             <Terminal output={command} className="text-sm">
@@ -190,7 +191,7 @@ function BashToolPart({ part }: { part: ToolUIPart }) {
         {bashOutput && (
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 Output
               </p>
               <span className="text-xs text-muted-foreground">
@@ -291,9 +292,9 @@ function HandoffToolPart({
     part.state === "output-error" ||
     Boolean(
       isReady &&
-        part.output &&
-        typeof part.output === "object" &&
-        !(part.output as { success?: boolean }).success
+      part.output &&
+      typeof part.output === "object" &&
+      !(part.output as { success?: boolean }).success
     )
 
   const input =
@@ -315,7 +316,8 @@ function HandoffToolPart({
         })
       : {}
 
-  const targetName: string = output.targetBotName || input.targetBot || "Teammate"
+  const targetName: string =
+    output.targetBotName || input.targetBot || "Teammate"
   const targetBot = bots?.find(
     (b) =>
       (output.targetBotId && b.id === output.targetBotId) ||
@@ -328,16 +330,16 @@ function HandoffToolPart({
   const isCurrent = Boolean(targetBotId && selectedBotId === targetBotId)
 
   return (
-    <div className="my-2 rounded-xl border border-border/80 bg-muted/40 p-3.5 shadow-sm transition-all">
+    <div className="my-2 rounded-xl border border-primary/20 bg-primary/5 p-3.5 shadow-sm transition-all">
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <ArrowRightLeft className="size-3.5" />
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs font-semibold text-foreground">
-                Handoff suggested
+                Active Bot Changed
               </span>
               <span className="text-xs text-muted-foreground">→</span>
               <div className="flex items-center gap-1.5">
@@ -370,17 +372,26 @@ function HandoffToolPart({
             {isCurrent ? (
               <>
                 <Check data-icon="inline-start" />
-                Speaking
+                Active
               </>
             ) : (
-              `Talk to ${targetName}`
+              `Switch to ${targetName}`
             )}
           </Button>
         ) : null}
       </div>
 
+      {isCurrent ? (
+        <div className="mt-2.5 flex items-center gap-1.5 border-t border-border/40 pt-2 text-[0.75rem] text-muted-foreground">
+          <Check className="size-3 text-primary" />
+          <span>
+            Bot automatically changed to <strong>{targetName}</strong>
+          </span>
+        </div>
+      ) : null}
+
       {reason ? (
-        <p className="mt-2 text-xs text-muted-foreground border-l-2 border-primary/40 pl-2.5 py-0.5 italic">
+        <p className="mt-2 border-l-2 border-primary/40 py-0.5 pl-2.5 text-xs text-muted-foreground italic">
           &ldquo;{reason}&rdquo;
         </p>
       ) : null}
@@ -440,7 +451,12 @@ function ToolPartRenderer({
   switch (toolName) {
     case "open_browser":
       return (
-        <GenericToolPart key={key} part={part} title="open_browser" showOutput />
+        <GenericToolPart
+          key={key}
+          part={part}
+          title="open_browser"
+          showOutput
+        />
       )
 
     case "bash":
@@ -543,7 +559,10 @@ function ToolPartRenderer({
     default:
       // Fallback: generic collapsible tool display
       return (
-        <ControlledTool key={key} isOpenByDefault={part.state === "output-error"}>
+        <ControlledTool
+          key={key}
+          isOpenByDefault={part.state === "output-error"}
+        >
           <ToolHeader type={part.type} state={part.state} />
           <ToolContent>
             <ToolInput input={part.input} />
@@ -593,8 +612,8 @@ export function Chat({
     () => ({
       botName: selectedBot?.name ?? botName,
       botJob: selectedBot?.job ?? botJob,
-      botInstructions: (selectedBot?.instructions ?? instructions) ?? null,
-      sandboxId: (selectedBot?.sandboxId ?? sandboxId) ?? null,
+      botInstructions: selectedBot?.instructions ?? instructions ?? null,
+      sandboxId: selectedBot?.sandboxId ?? sandboxId ?? null,
       selectedBotId: selectedBot?.id,
     }),
     [selectedBot, botName, botJob, instructions, sandboxId]
@@ -671,11 +690,14 @@ function ChatContent({
     return bots?.find((b) => b.id === selectedBotId) ?? bots?.[0]
   }, [bots, selectedBotId])
 
-    const getMessageBot = React.useCallback(
+  const getMessageBot = React.useCallback(
     (message: UIMessage, index: number) => {
       // 1. Direct metadata on assistant message
-      const meta = (message as unknown as { metadata?: Record<string, unknown> }).metadata
-      const metaBotId = (meta?.selectedBotId || meta?.botId) as string | undefined
+      const meta = (
+        message as unknown as { metadata?: Record<string, unknown> }
+      ).metadata
+      const metaBotId = (meta?.selectedBotId || meta?.botId) as
+        string | undefined
       if (metaBotId && bots) {
         const found = bots.find((b) => b.id === metaBotId)
         if (found) return found
@@ -694,8 +716,11 @@ function ChatContent({
       for (let i = index - 1; i >= 0; i--) {
         const prevMsg = messages[i]
         if (prevMsg && prevMsg.role === "user") {
-          const prevMeta = (prevMsg as unknown as { metadata?: Record<string, unknown> }).metadata
-          const prevBotId = (prevMeta?.selectedBotId || prevMeta?.botId) as string | undefined
+          const prevMeta = (
+            prevMsg as unknown as { metadata?: Record<string, unknown> }
+          ).metadata
+          const prevBotId = (prevMeta?.selectedBotId || prevMeta?.botId) as
+            string | undefined
           if (prevBotId && bots) {
             const found = bots.find((b) => b.id === prevBotId)
             if (found) return found
@@ -719,6 +744,128 @@ function ChatContent({
   )
 
   const isGenerating = status === "submitted" || status === "streaming"
+
+  // Track handled handoff event IDs so each handoff triggers at most once
+  const handledHandoffsRef = React.useRef<Set<string>>(new Set())
+  const lastPendingHandoffRef = React.useRef<{
+    targetBotId: string
+    targetBotName: string
+    originalQuery: string
+  } | null>(null)
+
+  // Seed handled handoffs from initialMessages on mount so historical handoffs don't fire toasts
+  React.useEffect(() => {
+    for (const msg of initialMessages) {
+      if (msg.role !== "assistant") continue
+      for (const part of msg.parts || []) {
+        const output = (part as any).output
+        if (output?.targetBotId) {
+          handledHandoffsRef.current.add(`${msg.id}-${output.targetBotId}`)
+        }
+      }
+    }
+  }, [initialMessages])
+
+  // Watch for new handoff tool calls to auto-switch the active bot and show confirmation on screen
+  React.useEffect(() => {
+    if (!isGroup || !bots || bots.length === 0) return
+
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue
+      for (const part of msg.parts || []) {
+        const isHandoff =
+          part.type === "tool-handoff" ||
+          ((part.type.startsWith("tool-") || part.type === "dynamic-tool") &&
+            (part as any).toolName === "handoff")
+
+        if (!isHandoff) continue
+
+        const output = (part as any).output
+        if (output && output.success && output.targetBotId) {
+          const handoffKey = `${msg.id}-${output.targetBotId}`
+          if (!handledHandoffsRef.current.has(handoffKey)) {
+            handledHandoffsRef.current.add(handoffKey)
+
+            const targetBot = bots.find(
+              (b) =>
+                b.id === output.targetBotId ||
+                b.name.toLowerCase() ===
+                  (output.targetBotName || "").toLowerCase()
+            )
+            const targetId = targetBot?.id || output.targetBotId
+            const targetName =
+              targetBot?.name || output.targetBotName || "Teammate"
+
+            // 1. Automatically switch the active bot
+            if (targetId) {
+              onSelectBotId(targetId)
+            }
+
+            // 2. Show on screen that the active bot changed
+            toast.add({
+              title: "Active Bot Changed",
+              description: `Switched speaking bot to ${targetName}.`,
+              type: "info",
+            })
+
+            // 3. Find user query to auto-continue with the new bot
+            const userMsgs = messages.filter((m) => m.role === "user")
+            const lastUser = userMsgs[userMsgs.length - 1]
+            let originalQuery = ""
+            if (lastUser) {
+              const textPart = lastUser.parts?.find((p) => p.type === "text")
+              originalQuery = textPart?.text || ""
+            }
+
+            lastPendingHandoffRef.current = {
+              targetBotId: targetId,
+              targetBotName: targetName,
+              originalQuery,
+            }
+          }
+        }
+      }
+    }
+  }, [isGroup, bots, messages, onSelectBotId])
+
+  // When generation finishes and there is a pending auto-handoff, auto-trigger the new bot
+  React.useEffect(() => {
+    if (status !== "ready") return
+    if (!lastPendingHandoffRef.current) return
+
+    const pending = lastPendingHandoffRef.current
+    lastPendingHandoffRef.current = null
+
+    const targetBot = bots?.find((b) => b.id === pending.targetBotId)
+    if (!targetBot) return
+
+    // Prevent loop: check if recent message was already an auto-handoff
+    const recentMessages = messages.slice(-3)
+    const wasAlreadyAutoHandoff = recentMessages.some(
+      (m) =>
+        (m as unknown as { metadata?: Record<string, unknown> }).metadata
+          ?.isAutoHandoff
+    )
+    if (wasAlreadyAutoHandoff) return
+
+    if (pending.originalQuery) {
+      sendMessage(
+        {
+          text: `[Handoff to ${pending.targetBotName}]: Please check your Memory.md and answer: "${pending.originalQuery}"`,
+        },
+        {
+          metadata: {
+            selectedBotId: targetBot.id,
+            botName: targetBot.name,
+            botJob: targetBot.job,
+            botInstructions: targetBot.instructions ?? null,
+            sandboxId: targetBot.sandboxId ?? null,
+            isAutoHandoff: true,
+          },
+        }
+      )
+    }
+  }, [status, bots, messages, sendMessage])
 
   const handleStop = React.useCallback(() => {
     stop()
@@ -745,8 +892,8 @@ function ChatContent({
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden min-h-0">
-      <Conversation className="flex-1 min-h-0">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+      <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-3xl">
           {messages.length === 0 ? (
             <ConversationEmptyState
@@ -754,8 +901,8 @@ function ChatContent({
                 isGroup
                   ? "Group Chat"
                   : botName
-                  ? `Chat with ${botName}`
-                  : "Start a conversation"
+                    ? `Chat with ${botName}`
+                    : "Start a conversation"
               }
               description={
                 isGroup && selectedBot
@@ -765,6 +912,24 @@ function ChatContent({
             />
           ) : (
             messages.map((message, messageIndex) => {
+              const meta = (
+                message as unknown as { metadata?: Record<string, unknown> }
+              ).metadata
+              if (meta?.isAutoHandoff) {
+                const targetBotName = (meta.botName as string) || "Teammate"
+                return (
+                  <div
+                    key={message.id}
+                    className="my-3 flex items-center justify-center"
+                  >
+                    <span className="flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3.5 py-1 text-xs font-medium text-foreground shadow-xs">
+                      <ArrowRightLeft className="size-3 animate-pulse text-primary" />
+                      {targetBotName} taking over to answer...
+                    </span>
+                  </div>
+                )
+              }
+
               const isAssistant = message.role === "assistant"
               const messageBot =
                 isGroup && isAssistant
@@ -774,15 +939,15 @@ function ChatContent({
               return (
                 <Message from={message.role} key={message.id}>
                   {isGroup && isAssistant ? (
-                    <div className="flex items-start gap-3 w-full">
+                    <div className="flex w-full items-start gap-3">
                       <ChatAvatar
                         seed={messageBot?.avatar || messageBot?.name || "bot"}
                         alt={messageBot?.name || "Bot"}
-                        className="size-8 shrink-0 rounded-full mt-0.5"
+                        className="mt-0.5 size-8 shrink-0 rounded-full"
                       />
-                      <div className="flex flex-col min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-1 flex-col">
                         {messageBot?.name && (
-                          <span className="text-xs font-semibold text-muted-foreground mb-1 select-none">
+                          <span className="mb-1 text-xs font-semibold text-muted-foreground select-none">
                             {messageBot.name}
                           </span>
                         )}
@@ -860,7 +1025,7 @@ function ChatContent({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="mx-auto w-full max-w-3xl p-4 shrink-0">
+      <div className="mx-auto w-full max-w-3xl shrink-0 p-4">
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
@@ -869,13 +1034,13 @@ function ChatContent({
                 isGroup && selectedBot
                   ? `Message ${selectedBot.name}...`
                   : botName
-                  ? `Message ${botName}...`
-                  : "Ask anything..."
+                    ? `Message ${botName}...`
+                    : "Ask anything..."
               }
               onChange={(e) => setInput(e.target.value)}
             />
           </PromptInputBody>
-          <PromptInputFooter className="justify-between items-center">
+          <PromptInputFooter className="items-center justify-between">
             {isGroup && bots && bots.length > 0 ? (
               <PromptInputTools>
                 <PromptInputSelect
@@ -884,7 +1049,7 @@ function ChatContent({
                     if (val) onSelectBotId(String(val))
                   }}
                 >
-                  <PromptInputSelectTrigger className="h-8 gap-2 px-2.5 rounded-lg border border-input bg-transparent text-xs hover:bg-muted font-normal text-foreground">
+                  <PromptInputSelectTrigger className="h-8 gap-2 rounded-lg border border-input bg-transparent px-2.5 text-xs font-normal text-foreground hover:bg-muted">
                     {selectedBot && (
                       <ChatAvatar
                         seed={selectedBot.avatar || selectedBot.name}
@@ -905,7 +1070,7 @@ function ChatContent({
                             alt={b.name}
                             className="size-4 shrink-0 rounded-full"
                           />
-                          <span className="font-medium text-xs">{b.name}</span>
+                          <span className="text-xs font-medium">{b.name}</span>
                         </div>
                       </PromptInputSelectItem>
                     ))}

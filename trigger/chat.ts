@@ -43,6 +43,35 @@ export function buildAgentInstructions(params: {
     ? `You are connected to an isolated Daytona cloud sandbox environment (Sandbox ID: ${params.sandboxId.trim()}).`
     : `You are running in a cloud environment without a provisioned sandbox.`
 
+  const memoryGuidance = params.sandboxId?.trim()
+    ? [
+        `# Persistent Memory Management (Memory.md)`,
+        `You have a dedicated persistent memory file at \`Memory.md\` located in your sandbox root filesystem.`,
+        `This file is your long-term memory. It is tied to your sandbox and persists across ALL conversations, including:`,
+        `- Private 1:1 direct chats with the user`,
+        `- Group chats with the user and other bots`,
+        ``,
+        `### Core Goal: Cross-Chat Memory Continuity`,
+        `Your primary memory goal is cross-chat recall: remember facts, user preferences, personal details, project requirements, past instructions, and decisions made in private 1:1 chats, even when asked about them in group chats with other bots (or vice versa).`,
+        ``,
+        `### When to Reference (Read) \`Memory.md\`:`,
+        `- Proactively check your memory using \`read_file(path="Memory.md")\` whenever:`,
+        `  1. The user asks a question about previous interactions, personal background, preferences, or project history (e.g. "Do you remember...", "What are my preferences?", "What did we decide about...", "Who am I?").`,
+        `  2. IN GROUP CHATS: When the user or a teammate bot asks you about something that might have been discussed previously in private 1:1 chats or earlier sessions. ALWAYS call \`read_file(path="Memory.md")\` to recall this context and answer accurately based on your persistent memory.`,
+        `  3. Starting any task where personalizing your response based on past user preferences or prior instructions produces a higher-quality result.`,
+        ``,
+        `### When to Write / Update \`Memory.md\`:`,
+        `- Update your memory using \`write_file(path="Memory.md", content=...)\` whenever:`,
+        `  1. IN PRIVATE 1:1 CHATS: The user mentions important personal facts, preferences, background, constraints, project context, or explicit instructions that should be retained long-term.`,
+        `  2. IN GROUP CHATS: Significant new facts, requirements, or decisions relevant to you or the user are established.`,
+        `- Safe Memory Update Procedure:`,
+        `  1. Call \`read_file(path="Memory.md")\` to inspect existing memories.`,
+        `  2. Merge the new information while PRESERVING all previous memories (never overwrite or wipe out existing memories unless the user explicitly asks you to update or remove a specific memory).`,
+        `  3. Keep the file structured, clean, and concise using Markdown headings and bullet points (e.g., "# User Profile & Preferences", "# Projects & Objectives", "# Key Decisions & Notes").`,
+        `  4. Write the complete updated content back using \`write_file(path="Memory.md", content=...)\`.`,
+      ].join("\n")
+    : ""
+
   const computerUseGuidance = params.sandboxId?.trim()
     ? [
         `# Computer Use & Desktop Environment`,
@@ -58,6 +87,16 @@ export function buildAgentInstructions(params: {
       ].join("\n")
     : ""
 
+  let directChatGuidance = ""
+  if (!params.isGroup) {
+    directChatGuidance = [
+      `# Private 1:1 Chat Context`,
+      `You are in a direct 1:1 conversation with the user as **${name}** (Role: ${job}).`,
+      `- Pay close attention to what the user shares regarding their preferences, background, ongoing work, and specific instructions.`,
+      `- Proactively record meaningful information in \`Memory.md\` using \`write_file\` so you will remember it in future private chats and in group chats.`,
+    ].join("\n")
+  }
+
   let groupChatGuidance = ""
   if (params.isGroup) {
     const chatTitle = params.chatName?.trim() || "Group Chat"
@@ -65,10 +104,14 @@ export function buildAgentInstructions(params: {
       .map(
         (b) =>
           `- **${b.name}** — Role: ${b.job}${
-            b.instructions ? ` | Specialty: ${b.instructions.slice(0, 200)}` : ""
+            b.instructions
+              ? ` | Specialty: ${b.instructions.slice(0, 200)}`
+              : ""
           }`
       )
       .join("\n")
+
+    const otherBotNames = (params.otherBots || []).map((b) => b.name).join(", ")
 
     groupChatGuidance = [
       `# Group Chat Context`,
@@ -77,6 +120,13 @@ export function buildAgentInstructions(params: {
       teammates
         ? `\nOther participating bots in this group chat:\n${teammates}`
         : "",
+      ``,
+      `# Memory Recall & Proactive Handoff in Group Chat`,
+      `- Remember that your \`Memory.md\` file contains notes, preferences, and facts learned from your private 1:1 chats with the user.`,
+      `- When asked about personal user details (such as names, pets, dog's name, preferences, background, past private discussions, or tasks), ALWAYS check your \`Memory.md\` via \`read_file(path="Memory.md")\` first.`,
+      `- CRITICAL: If you check your \`Memory.md\` and DO NOT find the answer, NEVER just say you don't know or ask the user to tell you again! You are in a group chat with teammates (${otherBotNames || "other bots"}) who may have learned this in their private 1:1 direct chats with the user!`,
+      `- Therefore, if the memory is not in your file, IMMEDIATELY call the \`handoff\` tool to transfer the turn to a teammate bot (e.g. ${otherBotNames || "a teammate"}) so they can check their memory and answer the user. State in your response that you checked your memory, didn't find it, and are handing off to that teammate who may have the memory!`,
+      `- If you were just handed this conversation from another bot and also do not find the answer in your Memory.md, do NOT call handoff again. Simply inform the user directly that you also checked your memory and could not find the information.`,
       ``,
       `# Collaboration & Handoff Guidance`,
       `- You have access to the \`handoff\` tool in this group chat.`,
@@ -97,8 +147,15 @@ export function buildAgentInstructions(params: {
     ``,
     `# Environment`,
     sandboxInfo,
+    memoryGuidance ? `\n${memoryGuidance}` : "",
     computerUseGuidance ? `\n${computerUseGuidance}` : "",
-    groupChatGuidance ? `\n${groupChatGuidance}` : "",
+    params.isGroup
+      ? groupChatGuidance
+        ? `\n${groupChatGuidance}`
+        : ""
+      : directChatGuidance
+        ? `\n${directChatGuidance}`
+        : "",
     ``,
     `Always respond in character according to your role and purpose. Maintain a helpful and professional demeanor.`,
   ].join("\n")
@@ -107,11 +164,7 @@ export function buildAgentInstructions(params: {
 async function getBotById(botId: string) {
   try {
     const db = getDb()
-    const rows = await db
-      .select()
-      .from(bots)
-      .where(eq(bots.id, botId))
-      .limit(1)
+    const rows = await db.select().from(bots).where(eq(bots.id, botId)).limit(1)
 
     return rows[0] ?? null
   } catch (error) {
@@ -226,6 +279,7 @@ ${botDescriptions}`,
 /**
  * Retrieves a Daytona sandbox and ensures it is started and ready.
  * Ensures the X virtual display server (Xvfb, xfce4, x11vnc) is active on DISPLAY=:0.
+ * Also ensures Memory.md exists in the sandbox.
  */
 async function getActiveSandbox(sandboxId: string) {
   const daytona = getDaytonaClient()
@@ -244,11 +298,22 @@ async function getActiveSandbox(sandboxId: string) {
     console.warn("Could not start computerUse desktop processes:", error)
   }
 
+  // Ensure Memory.md file exists in the sandbox root
+  try {
+    await sandbox.fs.getFileDetails("Memory.md")
+  } catch {
+    try {
+      await sandbox.fs.uploadFile(Buffer.from(""), "Memory.md")
+    } catch (e) {
+      console.warn("Could not ensure Memory.md exists in sandbox:", e)
+    }
+  }
+
   return sandbox
 }
 
 /**
- * Creates all computer-use tools bound to a specific Daytona sandbox.
+ * Creates all computer-use and filesystem tools bound to a specific Daytona sandbox.
  * All tools are server-side only — they run in Trigger.dev, never in the browser.
  */
 function makeSandboxTools(sandboxId: string) {
@@ -299,20 +364,41 @@ function makeSandboxTools(sandboxId: string) {
 
     read_file: tool({
       description:
-        "Read the contents of a file from the sandbox filesystem and return them as a string.",
+        "Read the contents of a file from the sandbox filesystem and return them as a string. Use path 'Memory.md' to read your persistent long-term memory file.",
       inputSchema: z.object({
         path: z.string().describe("Absolute or relative path to the file"),
       }),
       execute: async ({ path }: { path: string }) => {
-        const sandbox = await getActiveSandbox(sandboxId)
-        const buffer = await sandbox.fs.downloadFile(path)
-        return { content: buffer.toString("utf-8"), path }
+        try {
+          const sandbox = await getActiveSandbox(sandboxId)
+          const buffer = await sandbox.fs.downloadFile(path)
+          return { content: buffer.toString("utf-8"), path, success: true }
+        } catch (error: any) {
+          if (path === "Memory.md" || path.endsWith("/Memory.md")) {
+            try {
+              const sandbox = await getActiveSandbox(sandboxId)
+              await sandbox.fs.uploadFile(Buffer.from(""), path)
+              return {
+                content: "",
+                path,
+                success: true,
+                note: "Memory.md was blank/uninitialized.",
+              }
+            } catch {}
+          }
+          return {
+            content: "",
+            path,
+            success: false,
+            error: error?.message || "Failed to read file",
+          }
+        }
       },
     }),
 
     write_file: tool({
       description:
-        "Write text content to a file in the sandbox filesystem. Creates or overwrites the file.",
+        "Write text content to a file in the sandbox filesystem. Creates or overwrites the file. Use path 'Memory.md' to record or update your persistent long-term memory across chats.",
       inputSchema: z.object({
         path: z.string().describe("Absolute or relative path to the file"),
         content: z.string().describe("The text content to write"),
@@ -357,10 +443,7 @@ function makeSandboxTools(sandboxId: string) {
           .enum(["left", "right", "middle"])
           .default("left")
           .describe("Mouse button"),
-        double: z
-          .boolean()
-          .default(false)
-          .describe("Whether to double-click"),
+        double: z.boolean().default(false).describe("Whether to double-click"),
       }),
       execute: async ({
         x,
@@ -482,8 +565,7 @@ function makeSandboxTools(sandboxId: string) {
       inputSchema: z.object({}),
       execute: async (_args: Record<string, never>) => {
         const sandbox = await getActiveSandbox(sandboxId)
-        const screenshot =
-          await sandbox.computerUse.screenshot.takeFullScreen()
+        const screenshot = await sandbox.computerUse.screenshot.takeFullScreen()
         return {
           base64: screenshot.screenshot ?? "",
           mediaType: "image/png" as const,
@@ -515,8 +597,7 @@ function makeSandboxTools(sandboxId: string) {
       inputSchema: z.object({}),
       execute: async (_args: Record<string, never>) => {
         const sandbox = await getActiveSandbox(sandboxId)
-        const screenshot =
-          await sandbox.computerUse.screenshot.takeFullScreen()
+        const screenshot = await sandbox.computerUse.screenshot.takeFullScreen()
         return {
           base64: screenshot.screenshot ?? "",
           mediaType: "image/png" as const,
