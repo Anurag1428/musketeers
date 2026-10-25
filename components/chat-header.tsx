@@ -6,9 +6,13 @@ import { Monitor } from "lucide-react"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { BotDialog, type BotDialogBot } from "@/components/bot-dialog"
+import {
+  GroupChatDialog,
+  type GroupChatDialogChat,
+} from "@/components/group-chat-dialog"
 import { Button } from "@/components/ui/button"
 import type { ChatWithBot } from "@/chats/queries"
-import type { Bot } from "@/lib/db/schema"
+import type { Bot, Chat } from "@/lib/db/schema"
 
 export interface ChatHeaderProps {
   chat: ChatWithBot | {
@@ -80,15 +84,20 @@ export function ChatHeader({
   const firstMember = chat.members?.[0]
   const initialBot = firstMember?.bot ?? chat.bot
   const [currentBot, setCurrentBot] = React.useState(initialBot)
+  const [currentGroupName, setCurrentGroupName] = React.useState<string | null | undefined>(
+    isGroup ? chat.name : null
+  )
 
   React.useEffect(() => {
     if (!isGroup) {
       setCurrentBot(firstMember?.bot ?? chat.bot)
+    } else {
+      setCurrentGroupName(chat.name)
     }
   }, [chat, firstMember?.bot, isGroup])
 
   const title = isGroup
-    ? chat.name || "Group Chat"
+    ? currentGroupName || chat.name || "Group Chat"
     : currentBot?.name || chat.name || "Chat"
   const avatarSeed =
     currentBot?.avatar || currentBot?.name || chat.id || "default"
@@ -104,6 +113,21 @@ export function ChatHeader({
         }
       : null
 
+  const editableGroup: GroupChatDialogChat | null =
+    isGroup && chat.id
+      ? {
+          id: chat.id,
+          name: currentGroupName ?? chat.name ?? "Group Chat",
+          botIds: chatBots
+            .map((b) => b.id)
+            .filter((id): id is string => Boolean(id)),
+          bots: chatBots.filter(
+            (b): b is { id: string; name: string; avatar?: string | null; job?: string | null } =>
+              Boolean(b.id && b.name)
+          ),
+        }
+      : null
+
   const handleBotSuccess = (updatedBot: Bot) => {
     setCurrentBot(updatedBot)
     router.refresh()
@@ -114,9 +138,39 @@ export function ChatHeader({
     router.refresh()
   }
 
+  const handleGroupChatSuccess = (updatedChat: Chat) => {
+    setCurrentGroupName(updatedChat.name)
+    router.refresh()
+  }
+
+  const handleGroupChatDelete = () => {
+    router.push("/")
+    router.refresh()
+  }
+
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b px-4 sm:px-6">
-      {isGroup ? (
+      {isGroup && editableGroup ? (
+        <GroupChatDialog
+          chat={editableGroup}
+          onSuccess={handleGroupChatSuccess}
+          onDelete={handleGroupChatDelete}
+        >
+          <Button
+            variant="ghost"
+            className="h-auto -ml-2 flex items-center justify-start gap-3 min-w-0 px-2 py-1.5 font-normal text-foreground hover:bg-muted cursor-pointer rounded-lg shadow-none"
+          >
+            <GroupChatAvatar
+              bots={chatBots}
+              alt={title}
+              className="size-8 shrink-0"
+            />
+            <span className="truncate font-medium text-sm text-foreground">
+              {title}
+            </span>
+          </Button>
+        </GroupChatDialog>
+      ) : isGroup ? (
         <div className="flex items-center gap-3 min-w-0">
           <GroupChatAvatar
             bots={chatBots}
