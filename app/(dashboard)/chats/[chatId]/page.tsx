@@ -47,13 +47,13 @@ export default async function ChatPage({
       avatar: b.avatar,
       job: b.job,
       instructions: b.instructions,
-      sandboxId: b.sandboxId,
+      sandboxId: b.sandboxId || "desktop",
     }))
 
   const botName = chat.bot?.name || chat.name || undefined
   const botJob = chat.bot?.job || undefined
   const instructions = chat.bot?.instructions || undefined
-  const sandboxId = chat.bot?.sandboxId || undefined
+  const sandboxId = chat.bot?.sandboxId || "desktop"
 
   return (
     <ResizablePanelGroup
@@ -64,9 +64,9 @@ export default async function ChatPage({
         defaultSize={isDesktopOpen ? "60%" : "100%"}
         className="h-full min-h-0 overflow-hidden"
       >
-        <div className="flex h-full w-full flex-1 flex-col min-h-0 overflow-hidden">
+        <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
           <ChatHeader chat={chat} isDesktopOpen={isDesktopOpen} />
-          <main className="flex flex-1 flex-col min-h-0 overflow-hidden">
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <ChatView
               chatId={chatId}
               botName={botName}
@@ -87,10 +87,7 @@ export default async function ChatPage({
             minSize="20%"
             className="h-full min-h-0 min-w-0 overflow-hidden"
           >
-            <SandboxPreview
-              sandboxId={sandboxId}
-              botName={botName ?? "Bot"}
-            />
+            <SandboxPreview sandboxId={sandboxId} botName={botName ?? "Bot"} />
           </ResizablePanel>
         </>
       )}
