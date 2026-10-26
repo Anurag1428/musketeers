@@ -40,14 +40,17 @@ export function SandboxPreview({
     }
     return null
   })
-  const [isLoading, setIsLoading] = React.useState(!initialUrl && Boolean(sandboxId))
+  const [isLoading, setIsLoading] = React.useState(
+    !initialUrl && Boolean(sandboxId)
+  )
   const [isRefreshing, setIsRefreshing] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = React.useState(false)
   const [iframeKey, setIframeKey] = React.useState(0)
 
   // Anchor element in the resizable panel
-  const [placeholderEl, setPlaceholderEl] = React.useState<HTMLDivElement | null>(null)
+  const [placeholderEl, setPlaceholderEl] =
+    React.useState<HTMLDivElement | null>(null)
   const [rect, setRect] = React.useState<{
     top: number
     left: number
@@ -155,9 +158,9 @@ export function SandboxPreview({
     }
   }, [sandboxId, url])
 
-  // Auto-submit warning acceptance form to set Daytona bypass cookie
+  // Auto-submit warning acceptance form to set Daytona bypass cookie (for Daytona sandboxes only)
   React.useEffect(() => {
-    if (url && baseUrl && formRef.current) {
+    if (url && baseUrl && formRef.current && !url.startsWith("/desktop-preview")) {
       try {
         formRef.current.submit()
       } catch (e) {
@@ -210,9 +213,9 @@ export function SandboxPreview({
   const iframeName = `daytona-vnc-frame-${sandboxId ?? "default"}`
 
   return (
-    <div className="flex h-full w-full flex-col bg-background/50 overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-background/50">
       {/* Top panel bar with refresh button matching user's image */}
-      <div className="flex h-12 shrink-0 items-center justify-end px-4 border-b border-border/40">
+      <div className="flex h-12 shrink-0 items-center justify-end border-b border-border/40 px-4">
         <Button
           variant="ghost"
           size="icon-sm"
@@ -228,29 +231,33 @@ export function SandboxPreview({
       </div>
 
       {/* Main panel content: Device Mockup Preview & Bot label */}
-      <div className="flex flex-1 flex-col items-center justify-start p-4 sm:p-6 overflow-y-auto overflow-x-hidden min-h-0">
-        <div className="flex flex-col items-center w-full max-w-sm sm:max-w-md">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-start overflow-x-hidden overflow-y-auto p-4 sm:p-6">
+        <div className="flex w-full max-w-sm flex-col items-center sm:max-w-md">
           {/* Device Mockup Frame */}
-          <div className="relative w-full aspect-[4/3] rounded-2xl border-2 border-border/50 bg-zinc-900/90 p-2 sm:p-3 shadow-xl overflow-hidden flex items-center justify-center">
+          <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-2xl border-2 border-border/50 bg-zinc-900/90 p-2 shadow-xl sm:p-3">
             {/* Permanent placeholder anchor measured by ResizeObserver */}
             <div
               ref={setPlaceholderEl}
-              className="relative w-full h-full rounded-lg bg-black overflow-hidden flex items-center justify-center"
+              className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg bg-black"
             >
               {!sandboxId ? (
-                <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground p-4 text-center">
+                <div className="flex flex-col items-center justify-center gap-2 p-4 text-center text-muted-foreground">
                   <Monitor className="size-8 text-muted-foreground/30" />
                   <span className="text-xs">No sandbox ID provisioned</span>
                 </div>
               ) : isLoading ? (
-                <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground p-4 text-center">
+                <div className="flex flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground">
                   <Spinner className="size-6" />
-                  <span className="text-xs">Connecting to Daytona sandbox...</span>
+                  <span className="text-xs">
+                    Connecting to Desktop...
+                  </span>
                 </div>
               ) : error ? (
-                <div className="flex flex-col items-center justify-center gap-2.5 text-muted-foreground p-4 text-center">
+                <div className="flex flex-col items-center justify-center gap-2.5 p-4 text-center text-muted-foreground">
                   <AlertCircle className="size-6 text-destructive" />
-                  <span className="text-xs text-destructive max-w-xs">{error}</span>
+                  <span className="max-w-xs text-xs text-destructive">
+                    {error}
+                  </span>
                   <Button
                     variant="outline"
                     size="xs"
@@ -261,9 +268,11 @@ export function SandboxPreview({
                   </Button>
                 </div>
               ) : isFullscreen ? (
-                <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground text-center p-4">
-                  <Monitor className="size-8 text-muted-foreground/40 animate-pulse" />
-                  <span className="text-xs font-medium">Screen open in fullscreen</span>
+                <div className="flex flex-col items-center justify-center gap-2 p-4 text-center text-muted-foreground">
+                  <Monitor className="size-8 animate-pulse text-muted-foreground/40" />
+                  <span className="text-xs font-medium">
+                    Screen open in fullscreen
+                  </span>
                 </div>
               ) : null}
             </div>
@@ -303,120 +312,122 @@ export function SandboxPreview({
         2. Sits above DialogOverlay (z-[60] vs z-50) when fullscreen
         3. Stays in the exact same DOM node so VNC session never reloads or drops WebSocket
       */}
-      {mounted && url && createPortal(
-        <div
-          className={cn(
-            "overflow-hidden bg-black",
-            isFullscreen
-              ? "fixed inset-3 sm:inset-6 md:inset-8 z-[60] flex flex-col rounded-2xl border bg-background shadow-2xl ring-1 ring-foreground/10"
-              : "fixed z-40 rounded-lg shadow-md transition-all duration-75"
-          )}
-          style={
-            isFullscreen
-              ? undefined
-              : {
-                  top: rect?.top ?? 0,
-                  left: rect?.left ?? 0,
-                  width: rect?.width ?? 0,
-                  height: rect?.height ?? 0,
-                  opacity: rect && rect.width > 0 ? 1 : 0,
-                }
-          }
-          onKeyDown={(e) => {
-            // Prevent hotkeys from bubbling outside when in fullscreen
-            if (isFullscreen) {
-              e.stopPropagation()
-            }
-          }}
-        >
-          {/* Form auto-submits POST to Daytona to bypass the warning page & set cookie */}
-          {baseUrl && (
-            <form
-              ref={formRef}
-              method="POST"
-              action={`${baseUrl}/accept-daytona-preview-warning?redirect=${encodeURIComponent(url)}`}
-              target={iframeName}
-              className="hidden"
-            />
-          )}
-
-          {/* Fullscreen header with controls */}
-          {isFullscreen && (
-            <div className="flex h-12 shrink-0 items-center justify-between border-b px-4 bg-muted/40 backdrop-blur-sm">
-              <div className="flex items-center gap-2 min-w-0">
-                <Monitor className="size-4 shrink-0 text-muted-foreground" />
-                <span className="font-medium text-sm truncate text-foreground">
-                  {botName}&apos;s Desktop
-                </span>
-                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground ml-2 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-medium">
-                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Live
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  type="button"
-                  onClick={handleRefresh}
-                  disabled={isRefreshing}
-                  title="Refresh screen"
-                  className="cursor-pointer"
-                >
-                  <RotateCw className={cn(isRefreshing && "animate-spin")} />
-                  <span className="sr-only">Refresh desktop</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  type="button"
-                  onClick={() => setIsFullscreen(false)}
-                  title="Close fullscreen"
-                  className="cursor-pointer"
-                >
-                  <XIcon />
-                  <span className="sr-only">Close fullscreen</span>
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Iframe Viewport: interactive in fullscreen, display-only in preview */}
-          <div className="relative flex-1 w-full h-full min-h-0 bg-black flex items-center justify-center">
-            <iframe
-              key={iframeKey}
-              ref={iframeRef}
-              name={iframeName}
-              src={url}
-              title={`${botName}'s Daytona Desktop`}
-              className={cn(
-                "w-full h-full border-0 select-none bg-black",
-                isFullscreen ? "pointer-events-auto" : "pointer-events-none"
-              )}
-              allow="clipboard-read; clipboard-write; fullscreen"
-            />
-
-            {/* In preview mode: click overlay button inside the portaled container */}
-            {!isFullscreen && (
-              <button
-                type="button"
-                onClick={() => setIsFullscreen(true)}
-                className="absolute inset-0 z-10 cursor-pointer flex items-center justify-center group/screen bg-transparent hover:bg-black/20 transition-colors"
-                title="Click to open fullscreen"
-              >
-                <span className="opacity-0 group-hover/screen:opacity-100 transition-opacity px-2.5 py-1 rounded-full bg-background/90 text-foreground text-xs font-medium shadow-md border backdrop-blur-xs flex items-center gap-1.5 pointer-events-none">
-                  <Maximize2 className="size-3.5" />
-                  Click to open fullscreen
-                </span>
-                <span className="sr-only">
-                  Open {botName}&apos;s screen fullscreen
-                </span>
-              </button>
+      {mounted &&
+        url &&
+        createPortal(
+          <div
+            className={cn(
+              "overflow-hidden bg-black",
+              isFullscreen
+                ? "fixed inset-3 z-[60] flex flex-col rounded-2xl border bg-background shadow-2xl ring-1 ring-foreground/10 sm:inset-6 md:inset-8"
+                : "fixed z-40 rounded-lg shadow-md transition-all duration-75"
             )}
-          </div>
-        </div>,
-        document.body
-      )}
+            style={
+              isFullscreen
+                ? undefined
+                : {
+                    top: rect?.top ?? 0,
+                    left: rect?.left ?? 0,
+                    width: rect?.width ?? 0,
+                    height: rect?.height ?? 0,
+                    opacity: rect && rect.width > 0 ? 1 : 0,
+                  }
+            }
+            onKeyDown={(e) => {
+              // Prevent hotkeys from bubbling outside when in fullscreen
+              if (isFullscreen) {
+                e.stopPropagation()
+              }
+            }}
+          >
+            {/* Form auto-submits POST to Daytona to bypass the warning page & set cookie */}
+            {baseUrl && !url.startsWith("/desktop-preview") && (
+              <form
+                ref={formRef}
+                method="POST"
+                action={`${baseUrl}/accept-daytona-preview-warning?redirect=${encodeURIComponent(url)}`}
+                target={iframeName}
+                className="hidden"
+              />
+            )}
+
+            {/* Fullscreen header with controls */}
+            {isFullscreen && (
+              <div className="flex h-12 shrink-0 items-center justify-between border-b bg-muted/40 px-4 backdrop-blur-sm">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Monitor className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate text-sm font-medium text-foreground">
+                    {botName}&apos;s Desktop
+                  </span>
+                  <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-500 text-muted-foreground">
+                    <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+                    Live
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    type="button"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    title="Refresh screen"
+                    className="cursor-pointer"
+                  >
+                    <RotateCw className={cn(isRefreshing && "animate-spin")} />
+                    <span className="sr-only">Refresh desktop</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    type="button"
+                    onClick={() => setIsFullscreen(false)}
+                    title="Close fullscreen"
+                    className="cursor-pointer"
+                  >
+                    <XIcon />
+                    <span className="sr-only">Close fullscreen</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Iframe Viewport: interactive in fullscreen, display-only in preview */}
+            <div className="relative flex h-full min-h-0 w-full flex-1 items-center justify-center bg-black">
+              <iframe
+                key={iframeKey}
+                ref={iframeRef}
+                name={iframeName}
+                src={url}
+                title={`${botName}'s Daytona Desktop`}
+                className={cn(
+                  "h-full w-full border-0 bg-black select-none",
+                  isFullscreen ? "pointer-events-auto" : "pointer-events-none"
+                )}
+                allow="clipboard-read; clipboard-write; fullscreen"
+              />
+
+              {/* In preview mode: click overlay button inside the portaled container */}
+              {!isFullscreen && (
+                <button
+                  type="button"
+                  onClick={() => setIsFullscreen(true)}
+                  className="group/screen absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-transparent transition-colors hover:bg-black/20"
+                  title="Click to open fullscreen"
+                >
+                  <span className="pointer-events-none flex items-center gap-1.5 rounded-full border bg-background/90 px-2.5 py-1 text-xs font-medium text-foreground opacity-0 shadow-md backdrop-blur-xs transition-opacity group-hover/screen:opacity-100">
+                    <Maximize2 className="size-3.5" />
+                    Click to open fullscreen
+                  </span>
+                  <span className="sr-only">
+                    Open {botName}&apos;s screen fullscreen
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { auth } from "@clerk/nextjs/server"
 import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import { createBotSandbox, deleteBotSandbox } from "@/lib/daytona"
+import { isDesktopConfigured } from "@/lib/desktop-agent"
 import {
   bots,
   chats,
@@ -31,19 +32,26 @@ export async function createBot(input: CreateBotInput) {
   const botId = nanoid()
   const chatId = nanoid()
 
-  // Create Daytona sandbox for this bot
-  const sandbox = await createBotSandbox({
-    botId,
-    userId,
-    name: input.name,
-  })
+  // Use physical Ubuntu desktop by default if configured, otherwise Daytona cloud VM
+  let sandboxId = "desktop"
+  let createdDaytonaSandboxId: string | null = null
+
+  if (!isDesktopConfigured()) {
+    const sandbox = await createBotSandbox({
+      botId,
+      userId,
+      name: input.name,
+    })
+    sandboxId = sandbox.id
+    createdDaytonaSandboxId = sandbox.id
+  }
 
   try {
     const validatedBotData = insertBotSchema.parse({
       ...input,
       id: botId,
       userId,
-      sandboxId: sandbox.id,
+      sandboxId,
     })
 
     const validatedChatData = insertChatSchema.parse({
@@ -68,13 +76,15 @@ export async function createBot(input: CreateBotInput) {
 
     return newBots[0]
   } catch (error) {
-    // If DB transaction fails, clean up the created sandbox to prevent orphans
-    await deleteBotSandbox(sandbox.id).catch((cleanupError) => {
-      console.error(
-        "Failed to clean up Daytona sandbox after bot creation failure:",
-        cleanupError
-      )
-    })
+    // If DB transaction fails and a Daytona sandbox was created, clean it up
+    if (createdDaytonaSandboxId) {
+      await deleteBotSandbox(createdDaytonaSandboxId).catch((cleanupError) => {
+        console.error(
+          "Failed to clean up Daytona sandbox after bot creation failure:",
+          cleanupError
+        )
+      })
+    }
     throw error
   }
 }
@@ -154,8 +164,8 @@ export async function deleteBot(botId: string) {
 
   const deletedBot = deletedBots[0]
 
-  // Delete Daytona sandbox if present
-  if (deletedBot.sandboxId) {
+  // Delete Daytona sandbox if present and not the physical desktop
+  if (deletedBot.sandboxId && deletedBot.sandboxId !== "desktop") {
     await deleteBotSandbox(deletedBot.sandboxId)
   }
 

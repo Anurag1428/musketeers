@@ -2,6 +2,11 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { getDaytonaClient } from "@/lib/daytona"
+import {
+  isDesktopConfigured,
+  checkDesktopHealth,
+  getDesktopUrl,
+} from "@/lib/desktop-agent"
 
 export type FetchSandboxVncUrlResult = {
   success: boolean
@@ -16,6 +21,22 @@ export async function fetchSandboxVncUrl(
   const { userId } = await auth()
   if (!userId) {
     throw new Error("Unauthorized")
+  }
+
+  // Handle Physical Ubuntu Desktop
+  if (isDesktopConfigured() || sandboxId === "desktop" || !sandboxId) {
+    const health = await checkDesktopHealth()
+    if (!health.online) {
+      return {
+        success: false,
+        error: `Ubuntu Desktop is offline (${health.error || "unreachable at " + getDesktopUrl()})`,
+      }
+    }
+    return {
+      success: true,
+      url: "/desktop-preview",
+      baseUrl: getDesktopUrl(),
+    }
   }
 
   if (!sandboxId?.trim()) {

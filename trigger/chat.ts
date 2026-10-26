@@ -6,6 +6,20 @@ import { eq } from "drizzle-orm"
 import { bots, chatMembers, chats } from "@/lib/db/schema"
 import { getDb } from "@/lib/neon-db"
 import { getDaytonaClient } from "@/lib/daytona"
+import {
+  isDesktopConfigured,
+  executeDesktopCommand,
+  openDesktopBrowser,
+  takeDesktopScreenshot,
+  desktopMouseClick,
+  desktopMouseMove,
+  desktopMouseScroll,
+  desktopKeyboardType,
+  desktopKeyboardPress,
+  desktopReadFile,
+  desktopWriteFile,
+  desktopListFiles,
+} from "@/lib/desktop-agent"
 
 export const clientDataSchema = z.object({
   botName: z.string().optional(),
@@ -39,15 +53,24 @@ export function buildAgentInstructions(params: {
     params.purpose?.trim() ||
     "Assist the user with their requests in a helpful, accurate, and professional manner."
 
-  const sandboxInfo = params.sandboxId?.trim()
-    ? `You are connected to an isolated Daytona cloud sandbox environment (Sandbox ID: ${params.sandboxId.trim()}).`
-    : `You are running in a cloud environment without a provisioned sandbox.`
+  const isPhysical =
+    params.sandboxId === "desktop" ||
+    (!params.sandboxId && isDesktopConfigured())
+  const hasEnv = Boolean(params.sandboxId?.trim() || isDesktopConfigured())
 
-  const memoryGuidance = params.sandboxId?.trim()
+  const sandboxInfo = isPhysical
+    ? `You are connected directly to your dedicated Ubuntu Desktop workstation (Acer Veriton at 192.168.1.12:5000). You have native control over its bash shell, Chromium browser, mouse, keyboard, and screen.`
+    : params.sandboxId?.trim()
+      ? `You are connected to an isolated Daytona cloud sandbox environment (Sandbox ID: ${params.sandboxId.trim()}).`
+      : `You are running in a cloud environment without a provisioned sandbox.`
+
+  const memoryGuidance = hasEnv
     ? [
         `# Persistent Memory Management (Memory.md)`,
-        `You have a dedicated persistent memory file at \`Memory.md\` located in your sandbox root filesystem.`,
-        `This file is your long-term memory. It is tied to your sandbox and persists across ALL conversations, including:`,
+        isPhysical
+          ? `You have a dedicated persistent memory file at \`/home/anurag/Memory.md\` located on your Ubuntu desktop filesystem.`
+          : `You have a dedicated persistent memory file at \`Memory.md\` located in your sandbox root filesystem.`,
+        `This file is your long-term memory. It is tied to your desktop/sandbox and persists across ALL conversations, including:`,
         `- Private 1:1 direct chats with the user`,
         `- Group chats with the user and other bots`,
         ``,
@@ -72,13 +95,12 @@ export function buildAgentInstructions(params: {
       ].join("\n")
     : ""
 
-  const computerUseGuidance = params.sandboxId?.trim()
+  const computerUseGuidance = hasEnv
     ? [
         `# Computer Use & Desktop Environment`,
-        `- The sandbox runs an XFCE4 desktop GUI on Linux (DISPLAY=:0).`,
+        `- You are running with full desktop control on Linux (DISPLAY=:0).`,
         `- To browse the web or visit any site, ALWAYS use the \`open_browser\` tool.`,
         `- When asked to search for something on the web, directly pass the search results URL to \`open_browser\` (e.g. \`https://duckduckgo.com/?q=...\` or \`https://www.google.com/search?q=...\`) to immediately reach the results without wasting turns typing into a blank homepage.`,
-        `- NEVER run Python scripts (urllib, requests, beautifulsoup, bs4) or curl in bash to scrape or parse web pages when asked to browse or view a website. ALWAYS use \`open_browser\` and desktop interaction tools.`,
         `- Follow this execution loop when asked to perform a browser or desktop task:`,
         `  1. Call \`open_browser\` with the target or search URL.`,
         `  2. Call \`view_screen\` to inspect the desktop visually if further clicks or interactions are required.`,
@@ -620,6 +642,200 @@ function makeSandboxTools(sandboxId: string) {
   }
 }
 
+/**
+ * Creates all computer-use and filesystem tools bound to the physical Ubuntu desktop (Acer Veriton).
+ * Executes commands natively over the local network via HTTP listener.
+ */
+function makeDesktopTools() {
+  return {
+    open_browser: tool({
+      description:
+        "Open the Chromium web browser on the physical Ubuntu desktop to a specific URL. If the user asks to search for something, directly navigate to the search URL (e.g. 'https://duckduckgo.com/?q=...').",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .default("https://duckduckgo.com")
+          .describe("URL to navigate to"),
+      }),
+      execute: async ({ url }: { url: string }) => {
+        const res = await openDesktopBrowser(url)
+        return {
+          success: true,
+          url: res.url,
+          instruction:
+            "Chromium has opened on the physical desktop. Call view_screen to inspect the page layout, and call show_screen when ready to display the result to the user.",
+        }
+      },
+    }),
+
+    bash: tool({
+      description:
+        "Execute a shell command on the physical Ubuntu desktop and return its output. Use for running scripts, installing packages, or terminal operations.",
+      inputSchema: z.object({
+        command: z.string().describe("The shell command to run"),
+      }),
+      execute: async ({ command }: { command: string }) => {
+        const res = await executeDesktopCommand(command)
+        return {
+          stdout: res.stdout,
+          exitCode: res.exitCode,
+        }
+      },
+    }),
+
+    read_file: tool({
+      description:
+        "Read the contents of a file from the desktop filesystem. Use path 'Memory.md' to read your persistent long-term memory file.",
+      inputSchema: z.object({
+        path: z.string().describe("Absolute or relative path to the file"),
+      }),
+      execute: async ({ path }: { path: string }) => {
+        return desktopReadFile(path)
+      },
+    }),
+
+    write_file: tool({
+      description:
+        "Write text content to a file on the desktop filesystem. Use path 'Memory.md' to record or update your persistent long-term memory across chats.",
+      inputSchema: z.object({
+        path: z.string().describe("Absolute or relative path to the file"),
+        content: z.string().describe("The text content to write"),
+      }),
+      execute: async ({ path, content }: { path: string; content: string }) => {
+        return desktopWriteFile(path, content)
+      },
+    }),
+
+    list_files: tool({
+      description: "List files and directories in a given path on the desktop.",
+      inputSchema: z.object({
+        path: z
+          .string()
+          .describe("Directory path to list. Defaults to the home directory")
+          .default("."),
+      }),
+      execute: async ({ path }: { path: string }) => {
+        return desktopListFiles(path)
+      },
+    }),
+
+    mouse_click: tool({
+      description:
+        "Click the mouse at the given screen coordinates on the desktop.",
+      inputSchema: z.object({
+        x: z.number().describe("X coordinate"),
+        y: z.number().describe("Y coordinate"),
+        button: z
+          .enum(["left", "right", "middle"])
+          .default("left")
+          .describe("Mouse button"),
+        double: z.boolean().default(false).describe("Whether to double-click"),
+      }),
+      execute: async ({ x, y, button, double }) => {
+        return desktopMouseClick(x, y, button, double)
+      },
+    }),
+
+    mouse_move: tool({
+      description:
+        "Move the mouse cursor to the given coordinates on the desktop.",
+      inputSchema: z.object({
+        x: z.number().describe("X coordinate"),
+        y: z.number().describe("Y coordinate"),
+      }),
+      execute: async ({ x, y }: { x: number; y: number }) => {
+        return desktopMouseMove(x, y)
+      },
+    }),
+
+    mouse_scroll: tool({
+      description:
+        "Scroll the mouse wheel at the given coordinates on the desktop.",
+      inputSchema: z.object({
+        x: z.number().describe("X coordinate to scroll at"),
+        y: z.number().describe("Y coordinate to scroll at"),
+        direction: z.enum(["up", "down"]).describe("Scroll direction"),
+        amount: z.number().default(3).describe("Number of scroll steps"),
+      }),
+      execute: async ({ x, y, direction, amount }) => {
+        return desktopMouseScroll(x, y, direction, amount)
+      },
+    }),
+
+    keyboard_type: tool({
+      description:
+        "Type text into the currently focused element on the desktop.",
+      inputSchema: z.object({
+        text: z.string().describe("Text to type"),
+      }),
+      execute: async ({ text }: { text: string }) => {
+        return desktopKeyboardType(text)
+      },
+    }),
+
+    keyboard_press: tool({
+      description:
+        "Press a key or key combination (e.g. 'enter', 'escape', 'ctrl+c', 'super').",
+      inputSchema: z.object({
+        key: z
+          .string()
+          .describe("Key to press (e.g. 'enter', 'escape', 'ctrl+c')."),
+        modifiers: z
+          .array(z.enum(["ctrl", "alt", "shift", "cmd"]))
+          .default([])
+          .describe("Optional modifier keys"),
+      }),
+      execute: async ({ key, modifiers }) => {
+        return desktopKeyboardPress(key, modifiers)
+      },
+    }),
+
+    view_screen: tool({
+      description:
+        "Take a screenshot of the physical Ubuntu desktop to observe the current visual state. Returns the visual image of the screen so you can inspect where to click or type. The screenshot is not shown to the user.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        return takeDesktopScreenshot()
+      },
+      toModelOutput: ({ output }: any) => ({
+        type: "content",
+        value: [
+          {
+            type: "file",
+            mediaType: "image/png",
+            data: {
+              type: "data",
+              data: output.base64,
+            },
+          },
+        ],
+      }),
+    }),
+
+    show_screen: tool({
+      description:
+        "Take a screenshot of the physical Ubuntu desktop and display it directly to the user in the chat. Call this whenever you finish a browsing or desktop task, or whenever the user asks for a screenshot or to see the screen.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        return takeDesktopScreenshot()
+      },
+      toModelOutput: ({ output }: any) => ({
+        type: "content",
+        value: [
+          {
+            type: "file",
+            mediaType: "image/png",
+            data: {
+              type: "data",
+              data: output.base64,
+            },
+          },
+        ],
+      }),
+    }),
+  }
+}
+
 export const chatAgent = chat.agent({
   id: "chat",
   clientDataSchema,
@@ -641,7 +857,16 @@ export const chatAgent = chat.agent({
       currentBotId = memberBots[0]?.id
     }
 
-    const sandboxTools = sandboxId ? makeSandboxTools(sandboxId) : {}
+    const isPhysical =
+      sandboxId === "desktop" ||
+      (!sandboxId && isDesktopConfigured()) ||
+      isDesktopConfigured()
+
+    const sandboxTools = isPhysical
+      ? makeDesktopTools()
+      : sandboxId
+        ? makeSandboxTools(sandboxId)
+        : {}
     const isGroup = currentChat?.kind === "group" || memberBots.length > 1
 
     if (isGroup && memberBots.length > 1) {
