@@ -7,7 +7,9 @@ import {
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage, ToolUIPart, DynamicToolUIPart } from "ai"
-import { ArrowRightLeft, Check } from "lucide-react"
+import { ArrowRightLeft, Check, Volume2, VolumeX } from "lucide-react"
+import { SpeechInput } from "@/components/ai-elements/speech-input"
+import { useJarvisVoice } from "@/hooks/use-jarvis-voice"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -688,6 +690,59 @@ function ChatContent({
     resume: initialMessages.length > 0,
   })
 
+  const {
+    isSpeaking,
+    autoSpeak,
+    speakingMessageId,
+    speak,
+    stopSpeaking,
+    toggleAutoSpeak,
+  } = useJarvisVoice()
+
+  const isGenerating = status === "submitted" || status === "streaming"
+  const wasGeneratingRef = React.useRef(false)
+  const lastHandledMsgIdRef = React.useRef<string | null>(
+    initialMessages[initialMessages.length - 1]?.id ?? null
+  )
+
+  // Auto-speak new assistant responses when generation completes
+  React.useEffect(() => {
+    if (isGenerating) {
+      wasGeneratingRef.current = true
+      stopSpeaking()
+    } else if (wasGeneratingRef.current && status === "ready") {
+      wasGeneratingRef.current = false
+
+      if (messages.length === 0) return
+
+      const lastMsg = messages[messages.length - 1]
+      if (
+        lastMsg &&
+        lastMsg.role === "assistant" &&
+        lastHandledMsgIdRef.current !== lastMsg.id
+      ) {
+        lastHandledMsgIdRef.current = lastMsg.id
+
+        if (autoSpeak) {
+          const textParts = lastMsg.parts
+            ?.filter((p) => p.type === "text")
+            .map((p: any) => p.text)
+            .join(" ")
+          if (textParts) {
+            speak(textParts, { messageId: lastMsg.id, isAuto: true })
+          }
+        }
+      }
+    } else if (!isGenerating && status === "ready" && messages.length > 0) {
+      // Keep tracking latest assistant message even if autoSpeak is off,
+      // so toggling autoSpeak later NEVER re-plays old messages!
+      const lastMsg = messages[messages.length - 1]
+      if (lastMsg && lastMsg.role === "assistant") {
+        lastHandledMsgIdRef.current = lastMsg.id
+      }
+    }
+  }, [isGenerating, status, autoSpeak, messages, speak, stopSpeaking])
+
   const selectedBot = React.useMemo(() => {
     return bots?.find((b) => b.id === selectedBotId) ?? bots?.[0]
   }, [bots, selectedBotId])
@@ -748,8 +803,11 @@ function ChatContent({
   const getUserTargetBot = React.useCallback(
     (message: UIMessage, index: number) => {
       // 1. Direct metadata on user message
-      const meta = (message as unknown as { metadata?: Record<string, unknown> }).metadata
-      const metaBotId = (meta?.selectedBotId || meta?.botId) as string | undefined
+      const meta = (
+        message as unknown as { metadata?: Record<string, unknown> }
+      ).metadata
+      const metaBotId = (meta?.selectedBotId || meta?.botId) as
+        string | undefined
       if (metaBotId && bots) {
         const found = bots.find((b) => b.id === metaBotId)
         if (found) return found
@@ -769,8 +827,11 @@ function ChatContent({
         const nextMsg = messages[i]
         if (nextMsg) {
           if (nextMsg.role === "assistant") {
-            const nextMeta = (nextMsg as unknown as { metadata?: Record<string, unknown> }).metadata
-            const nextBotId = (nextMeta?.selectedBotId || nextMeta?.botId) as string | undefined
+            const nextMeta = (
+              nextMsg as unknown as { metadata?: Record<string, unknown> }
+            ).metadata
+            const nextBotId = (nextMeta?.selectedBotId || nextMeta?.botId) as
+              string | undefined
             if (nextBotId && bots) {
               const found = bots.find((b) => b.id === nextBotId)
               if (found) return found
@@ -789,8 +850,6 @@ function ChatContent({
     },
     [bots, messages, selectedBot]
   )
-
-  const isGenerating = status === "submitted" || status === "streaming"
 
   // Track handled handoff event IDs so each handoff triggers at most once
   const handledHandoffsRef = React.useRef<Set<string>>(new Set())
@@ -915,11 +974,13 @@ function ChatContent({
   }, [status, bots, messages, sendMessage])
 
   const handleStop = React.useCallback(() => {
+    stopSpeaking()
     stop()
     transport.stopGeneration(chatId)
-  }, [stop, transport, chatId])
+  }, [stopSpeaking, stop, transport, chatId])
 
   const handleSubmit = (message: PromptInputMessage) => {
+    stopSpeaking()
     const text = message.text?.trim() || input.trim()
     if (!text) return
 
@@ -1041,69 +1102,148 @@ function ChatContent({
                             return null
                           })}
                         </MessageContent>
+                        {message.parts?.some((p) => p.type === "text") && (
+                          <div className="mt-1 flex items-center gap-1.5 opacity-60 transition-opacity hover:opacity-100">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-6 cursor-pointer rounded-md text-muted-foreground hover:text-foreground"
+                              title={
+                                speakingMessageId === message.id
+                                  ? "Stop voice"
+                                  : "Read aloud"
+                              }
+                              onClick={() => {
+                                if (speakingMessageId === message.id) {
+                                  stopSpeaking()
+                                } else {
+                                  const fullText = message.parts
+                                    ?.filter((p) => p.type === "text")
+                                    .map((p: any) => p.text)
+                                    .join(" ")
+                                  if (fullText)
+                                    speak(fullText, { messageId: message.id })
+                                }
+                              }}
+                            >
+                              {speakingMessageId === message.id ? (
+                                <VolumeX className="size-3.5 animate-pulse text-destructive" />
+                              ) : (
+                                <Volume2 className="size-3.5" />
+                              )}
+                            </Button>
+                            {speakingMessageId === message.id && (
+                              <span className="animate-pulse text-[10px] font-medium text-primary">
+                                Speaking...
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
-                    <MessageContent
-                      className={
-                        isGroup && userTargetBot
-                          ? hasNewlines
-                            ? "group-[.is-user]:flex-row group-[.is-user]:items-start group-[.is-user]:gap-2.5 group-[.is-user]:py-2.5 group-[.is-user]:px-3.5"
-                            : "group-[.is-user]:flex-row group-[.is-user]:items-center group-[.is-user]:gap-2.5 group-[.is-user]:py-2 group-[.is-user]:px-3.5"
-                          : undefined
-                      }
-                    >
-                      {isGroup && userTargetBot && (
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "h-6.5 shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-black/25 dark:bg-black/40 border border-border/70 text-foreground text-xs font-semibold shadow-2xs select-none",
-                            hasNewlines && "mt-0.5"
-                          )}
-                        >
-                          <ChatAvatar
-                            seed={userTargetBot.avatar || userTargetBot.name}
-                            alt={userTargetBot.name}
-                            className="size-3.5 shrink-0 rounded-full"
-                          />
-                          <span className="truncate max-w-[160px] font-medium leading-none">
-                            {userTargetBot.name}
-                          </span>
-                        </Badge>
-                      )}
-                      {message.parts?.map((part, i) => {
-                        if (part.type === "text") {
-                          return (
-                            <span
-                              key={`${message.id}-${i}`}
-                              className="text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0"
-                            >
-                              {part.text.replace(/^\n+/, "")}
-                            </span>
-                          )
+                    <>
+                      <MessageContent
+                        className={
+                          isGroup && userTargetBot
+                            ? hasNewlines
+                              ? "group-[.is-user]:flex-row group-[.is-user]:items-start group-[.is-user]:gap-2.5 group-[.is-user]:px-3.5 group-[.is-user]:py-2.5"
+                              : "group-[.is-user]:flex-row group-[.is-user]:items-center group-[.is-user]:gap-2.5 group-[.is-user]:px-3.5 group-[.is-user]:py-2"
+                            : undefined
                         }
-
-                        // Render tool call parts (type starts with "tool-" or is "dynamic-tool")
-                        if (
-                          part.type.startsWith("tool-") ||
-                          part.type === "dynamic-tool"
-                        ) {
-                          return (
-                            <ToolPartRenderer
-                              key={`${message.id}-${i}`}
-                              part={part as AnyToolPart}
-                              messageId={message.id}
-                              index={i}
-                              bots={bots}
-                              selectedBotId={selectedBotId}
-                              onSelectBotId={onSelectBotId}
+                      >
+                        {isGroup && userTargetBot && (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-black/25 px-2.5 py-0.5 text-xs font-semibold text-foreground shadow-2xs select-none dark:bg-black/40",
+                              hasNewlines && "mt-0.5"
+                            )}
+                          >
+                            <ChatAvatar
+                              seed={userTargetBot.avatar || userTargetBot.name}
+                              alt={userTargetBot.name}
+                              className="size-3.5 shrink-0 rounded-full"
                             />
-                          )
-                        }
+                            <span className="max-w-[160px] truncate leading-none font-medium">
+                              {userTargetBot.name}
+                            </span>
+                          </Badge>
+                        )}
+                        {message.parts?.map((part, i) => {
+                          if (part.type === "text") {
+                            return (
+                              <span
+                                key={`${message.id}-${i}`}
+                                className="min-w-0 text-sm leading-relaxed break-words whitespace-pre-wrap"
+                              >
+                                {part.text.replace(/^\n+/, "")}
+                              </span>
+                            )
+                          }
 
-                        return null
-                      })}
-                    </MessageContent>
+                          // Render tool call parts (type starts with "tool-" or is "dynamic-tool")
+                          if (
+                            part.type.startsWith("tool-") ||
+                            part.type === "dynamic-tool"
+                          ) {
+                            return (
+                              <ToolPartRenderer
+                                key={`${message.id}-${i}`}
+                                part={part as AnyToolPart}
+                                messageId={message.id}
+                                index={i}
+                                bots={bots}
+                                selectedBotId={selectedBotId}
+                                onSelectBotId={onSelectBotId}
+                              />
+                            )
+                          }
+
+                          return null
+                        })}
+                      </MessageContent>
+                      {isAssistant &&
+                        message.parts?.some((p) => p.type === "text") && (
+                          <div className="mt-1 flex items-center gap-1.5 opacity-60 transition-opacity hover:opacity-100">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-6 cursor-pointer rounded-md text-muted-foreground hover:text-foreground"
+                              title={
+                                speakingMessageId === message.id
+                                  ? "Stop voice"
+                                  : "Read aloud"
+                              }
+                              onClick={() => {
+                                if (speakingMessageId === message.id) {
+                                  stopSpeaking()
+                                } else {
+                                  const fullText = message.parts
+                                    ?.filter((p) => p.type === "text")
+                                    .map((p: any) => p.text)
+                                    .join(" ")
+                                  if (fullText)
+                                    speak(fullText, { messageId: message.id })
+                                }
+                              }}
+                            >
+                              {speakingMessageId === message.id ? (
+                                <VolumeX className="size-3.5 animate-pulse text-destructive" />
+                              ) : (
+                                <Volume2 className="size-3.5" />
+                              )}
+                            </Button>
+                            {speakingMessageId === message.id && (
+                              <span className="animate-pulse text-[10px] font-medium text-primary">
+                                Speaking...
+                              </span>
+                            )}
+                          </div>
+                        )}
+                    </>
                   )}
                 </Message>
               )
@@ -1114,6 +1254,25 @@ function ChatContent({
       </Conversation>
 
       <div className="mx-auto w-full max-w-3xl shrink-0 p-4">
+        {isSpeaking && (
+          <div className="mb-2 flex animate-in items-center justify-between rounded-lg border border-primary/20 bg-primary/10 px-3 py-1.5 text-xs text-primary shadow-xs fade-in slide-in-from-bottom-1">
+            <div className="flex items-center gap-2">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75"></span>
+                <span className="relative inline-flex size-2 rounded-full bg-primary"></span>
+              </span>
+              <span className="font-medium">JARVIS is speaking...</span>
+            </div>
+            <button
+              type="button"
+              onClick={stopSpeaking}
+              className="flex cursor-pointer items-center gap-1 font-semibold text-primary transition-colors hover:text-destructive"
+              title="Stop speaking (or press Escape)"
+            >
+              <span>Stop Speaking (Esc)</span>
+            </button>
+          </div>
+        )}
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputBody>
             <PromptInputTextarea
@@ -1125,54 +1284,99 @@ function ChatContent({
                     ? `Message ${botName}...`
                     : "Ask anything..."
               }
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                if (isSpeaking) stopSpeaking()
+                setInput(e.target.value)
+              }}
             />
           </PromptInputBody>
           <PromptInputFooter className="items-center justify-between">
-            {isGroup && bots && bots.length > 0 ? (
-              <PromptInputTools>
-                <PromptInputSelect
-                  value={selectedBotId}
-                  onValueChange={(val) => {
-                    if (val) onSelectBotId(String(val))
-                  }}
-                >
-                  <PromptInputSelectTrigger className="h-8 gap-2 rounded-lg border border-input bg-transparent px-2.5 text-xs font-normal text-foreground hover:bg-muted">
-                    {selectedBot && (
-                      <ChatAvatar
-                        seed={selectedBot.avatar || selectedBot.name}
-                        alt={selectedBot.name}
-                        className="size-4 shrink-0 rounded-full"
-                      />
-                    )}
-                    <PromptInputSelectValue placeholder="Pick a bot">
-                      {selectedBot?.name ?? "Pick a bot"}
-                    </PromptInputSelectValue>
-                  </PromptInputSelectTrigger>
-                  <PromptInputSelectContent align="start">
-                    {bots.map((b) => (
-                      <PromptInputSelectItem key={b.id} value={b.id}>
-                        <div className="flex items-center gap-2">
-                          <ChatAvatar
-                            seed={b.avatar || b.name}
-                            alt={b.name}
-                            className="size-4 shrink-0 rounded-full"
-                          />
-                          <span className="text-xs font-medium">{b.name}</span>
-                        </div>
-                      </PromptInputSelectItem>
-                    ))}
-                  </PromptInputSelectContent>
-                </PromptInputSelect>
-              </PromptInputTools>
-            ) : (
-              <div />
-            )}
-            <PromptInputSubmit
-              disabled={!input.trim() && !isGenerating}
-              status={status}
-              onStop={handleStop}
-            />
+            <div className="flex items-center gap-2">
+              {isGroup && bots && bots.length > 0 && (
+                <PromptInputTools>
+                  <PromptInputSelect
+                    value={selectedBotId}
+                    onValueChange={(val) => {
+                      if (val) onSelectBotId(String(val))
+                    }}
+                  >
+                    <PromptInputSelectTrigger className="h-8 gap-2 rounded-lg border border-input bg-transparent px-2.5 text-xs font-normal text-foreground hover:bg-muted">
+                      {selectedBot && (
+                        <ChatAvatar
+                          seed={selectedBot.avatar || selectedBot.name}
+                          alt={selectedBot.name}
+                          className="size-4 shrink-0 rounded-full"
+                        />
+                      )}
+                      <PromptInputSelectValue placeholder="Pick a bot">
+                        {selectedBot?.name ?? "Pick a bot"}
+                      </PromptInputSelectValue>
+                    </PromptInputSelectTrigger>
+                    <PromptInputSelectContent align="start">
+                      {bots.map((b) => (
+                        <PromptInputSelectItem key={b.id} value={b.id}>
+                          <div className="flex items-center gap-2">
+                            <ChatAvatar
+                              seed={b.avatar || b.name}
+                              alt={b.name}
+                              className="size-4 shrink-0 rounded-full"
+                            />
+                            <span className="text-xs font-medium">
+                              {b.name}
+                            </span>
+                          </div>
+                        </PromptInputSelectItem>
+                      ))}
+                    </PromptInputSelectContent>
+                  </PromptInputSelect>
+                </PromptInputTools>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={toggleAutoSpeak}
+                title={
+                  autoSpeak
+                    ? "Voice Responses: ON (click to mute)"
+                    : "Voice Responses: OFF (click to enable auto-voice)"
+                }
+                className={cn(
+                  "size-8 cursor-pointer rounded-lg transition-colors",
+                  autoSpeak
+                    ? "bg-primary/10 text-primary hover:bg-primary/20"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {autoSpeak ? (
+                  <Volume2 className="size-4 text-emerald-500" />
+                ) : (
+                  <VolumeX className="size-4" />
+                )}
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <SpeechInput
+                size="icon-sm"
+                variant="ghost"
+                className="size-8 cursor-pointer rounded-lg text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  if (isSpeaking) stopSpeaking()
+                }}
+                onTranscriptionChange={(transcribedText) => {
+                  if (isSpeaking) stopSpeaking()
+                  setInput((prev) =>
+                    prev ? `${prev.trim()} ${transcribedText}` : transcribedText
+                  )
+                }}
+              />
+              <PromptInputSubmit
+                disabled={!input.trim() && !isGenerating}
+                status={status}
+                onStop={handleStop}
+              />
+            </div>
           </PromptInputFooter>
         </PromptInput>
       </div>
