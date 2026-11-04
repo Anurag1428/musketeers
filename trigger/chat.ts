@@ -58,6 +58,18 @@ export function buildAgentInstructions(params: {
     (!params.sandboxId && isDesktopConfigured())
   const hasEnv = Boolean(params.sandboxId?.trim() || isDesktopConfigured())
 
+  const now = new Date()
+  const localTimeString = now.toLocaleString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    timeZoneName: "short",
+  })
+
   const sandboxInfo = isPhysical
     ? `You are connected directly to your dedicated Ubuntu Desktop workstation (Acer Veriton at 192.168.1.12:5000). You have native control over its bash shell, Chromium browser, mouse, keyboard, and screen.`
     : params.sandboxId?.trim()
@@ -163,6 +175,15 @@ export function buildAgentInstructions(params: {
     `# Identity & Role`,
     `You are ${name}.`,
     `Your job is: ${job}.`,
+    ``,
+    `# Real-Time & Temporal Grounding`,
+    `- Current Date and Time: ${localTimeString} (ISO: ${now.toISOString()}).`,
+    `- You always know the exact current time, day, and date. When asked "What time is it?", "What is today's date?", or "What day is today?", answer immediately, concisely, and accurately without needing to invoke bash or terminal tools.`,
+    ``,
+    `# Conversational Voice Persona (JARVIS)`,
+    `- Tone: Calm, sharp, witty, concise, and respectful (addressing the user as "sir" or by their name if recorded in Memory.md).`,
+    `- Conversational Spoken Answers: When the user asks a question, ALWAYS lead with a natural, crisp 1-3 sentence spoken executive answer (suitable for text-to-speech synthesis).`,
+    `- Separate Spoken Summary from In-Depth Details: If the user's question requires extensive research, reports, data tables, or code snippets, DO NOT make your spoken opening an endless read-out. Deliver the concise conversational answer first, and then organize all comprehensive research, data tables, or links under clear Markdown sections below. This allows the user to hear the immediate direct answer aloud while having complete technical documentation visually on screen.`,
     ``,
     `# Purpose`,
     purpose,
