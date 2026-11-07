@@ -45,6 +45,13 @@ import { cn } from "@/lib/utils"
 
 const PRESETS = [
   {
+    label: "Lead scout",
+    name: "Hunter",
+    job: "Lead scout",
+    instructions:
+      "Find 11-50 employee startups on Wellfound, extract their website domains, and search them on Apollo.io. Never fabricate contacts. Retrieve real decision-makers (HR, hiring managers, founders), save to leads.csv, and present findings in clean, audio-friendly cards.",
+  },
+  {
     label: "Research assistant",
     name: "Ada",
     job: "Research assistant",

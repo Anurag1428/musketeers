@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm"
-import { index, pgEnum, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core"
+import { boolean, index, pgEnum, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-core"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { nanoid } from "nanoid"
 
@@ -71,6 +71,7 @@ export const chatMembers = pgTable(
 
 export const botsRelations = relations(bots, ({ many }) => ({
   memberships: many(chatMembers),
+  startupLeads: many(startupLeads),
 }))
 
 export const chatsRelations = relations(chats, ({ many }) => ({
@@ -107,3 +108,51 @@ export type NewChatMember = typeof chatMembers.$inferInsert
 
 export const insertChatMemberSchema = createInsertSchema(chatMembers)
 export const selectChatMemberSchema = createSelectSchema(chatMembers)
+
+export const startupLeads = pgTable(
+  "startup_leads",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    userId: text("user_id").notNull(),
+    botId: text("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    startupName: text("startup_name").notNull(),
+    domain: text("domain").notNull(),
+    fundingRound: text("funding_round").notNull(),
+    fundingAmount: text("funding_amount").notNull(),
+    founderName: text("founder_name").notNull(),
+    founderRole: text("founder_role").notNull(),
+    verifiedEmail: text("verified_email").notNull(),
+    mxVerified: boolean("mx_verified").default(false).notNull(),
+    linkedinXrayUrl: text("linkedin_xray_url").notNull(),
+    linkedinNote: text("linkedin_note").notNull(),
+    emailSubject: text("email_subject").notNull(),
+    emailBody: text("email_body").notNull(),
+    announcedDate: text("announced_date"),
+    productSummary: text("product_summary"),
+    sourceArticleUrl: text("source_article_url"),
+    isRumoured: boolean("is_rumoured").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("startup_leads_user_id_idx").on(table.userId),
+    index("startup_leads_bot_id_idx").on(table.botId),
+  ]
+)
+
+export const startupLeadsRelations = relations(startupLeads, ({ one }) => ({
+  bot: one(bots, {
+    fields: [startupLeads.botId],
+    references: [bots.id],
+  }),
+}))
+
+export const insertStartupLeadSchema = createInsertSchema(startupLeads)
+export const selectStartupLeadSchema = createSelectSchema(startupLeads)
+export type StartupLead = typeof startupLeads.$inferSelect
+export type NewStartupLead = typeof startupLeads.$inferInsert
