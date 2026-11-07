@@ -44,6 +44,7 @@ export async function executeDesktopCommand(command: string): Promise<{
   exitCode: number
 }> {
   const envPrefix = [
+    "export PATH=/home/anurag/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH",
     "export XDG_RUNTIME_DIR=/run/user/1000",
     "export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
     "export DISPLAY=:0",
@@ -67,20 +68,85 @@ export async function executeDesktopCommand(command: string): Promise<{
 }
 
 /**
- * Launches Chromium on the Ubuntu desktop.
+ * Launches or navigates Chromium on the Ubuntu desktop.
+ * If Chromium is already open and listening on CDP port 9222, navigates the active tab
+ * via agent-browser instead of spawning duplicate processes.
+ * Uses a persistent profile at /home/anurag/.config/jarvis-chrome-profile so user logins
+ * (Wellfound, Apollo, LinkedIn, etc.) persist permanently across tasks.
+ * Automatically returns the initial accessibility DOM snapshot with @eN element refs.
  */
 export async function openDesktopBrowser(url: string): Promise<{
   success: boolean
   url: string
+  snapshot?: string
+  instruction: string
+  navigatedExisting?: boolean
 }> {
   const targetUrl = url.startsWith("http") ? url : `https://${url}`
-  const command = `nohup /snap/bin/chromium --no-sandbox "${targetUrl}" </dev/null >/dev/null 2>&1 &`
+  // Use snap-permitted common profile directory so AppArmor grants read/write permissions
+  const profileDir = "/home/anurag/snap/chromium/common/jarvis-profile"
 
-  await executeDesktopCommand(command)
-  // Give window 2 seconds to paint
-  await new Promise((r) => setTimeout(r, 2000))
+  // Check if Chromium is already active with CDP port 9222 listening
+  const cdpCheck = await executeDesktopCommand(
+    "curl -s --connect-timeout 1 http://127.0.0.1:9222/json/version"
+  ).catch(() => ({ exitCode: 1, stdout: "", stderr: "" }))
 
-  return { success: true, url: targetUrl }
+  let navigatedExisting = false
+
+  if (cdpCheck.exitCode === 0 && cdpCheck.stdout.includes("Browser")) {
+    // Port 9222 is listening! Navigate the active tab directly via agent-browser open
+    const navCmd = `timeout 15s sh -c 'if command -v agent-browser >/dev/null 2>&1; then agent-browser --cdp 9222 open "${targetUrl}"; elif [ -x /home/anurag/bin/agent-browser ]; then /home/anurag/bin/agent-browser --cdp 9222 open "${targetUrl}"; else npx -y agent-browser --cdp 9222 open "${targetUrl}"; fi'`
+    const navResult = await executeDesktopCommand(navCmd).catch(() => ({
+      exitCode: 1,
+    }))
+
+    if (navResult.exitCode === 0) {
+      navigatedExisting = true
+    }
+  }
+
+  if (!navigatedExisting) {
+    // If port 9222 is not active, kill any stale non-CDP Chromium instance first
+    await executeDesktopCommand("pkill -f chromium 2>/dev/null || true").catch(
+      () => {}
+    )
+
+    // Ensure any stale SingletonLock inside the profile directory is removed only if Chromium is not running on port 9222
+    await executeDesktopCommand(
+      `mkdir -p "${profileDir}" && rm -f "${profileDir}/SingletonLock" "${profileDir}/SingletonSocket" "${profileDir}/SingletonCookie" 2>/dev/null || true`
+    ).catch(() => {})
+
+    const command = `nohup /snap/bin/chromium --no-sandbox --test-type --disable-infobars --start-maximized --no-first-run --no-default-browser-check --disable-session-crashed-bubble --disable-search-engine-choice-screen --user-data-dir="${profileDir}" --remote-debugging-port=9222 "${targetUrl}" </dev/null >/dev/null 2>&1 &`
+
+    await executeDesktopCommand(command)
+  }
+
+  // Wait 2.2 seconds for the window/page to render
+  await new Promise((r) => setTimeout(r, 2200))
+
+  // Dismiss any lingering dialogs by pressing Escape
+  await executeDesktopCommand("xdotool key Escape").catch(() => {})
+
+  // Auto-return the accessibility DOM snapshot so the model gets @eN element refs immediately on Step 1
+  const snapCmd = `timeout 15s sh -c 'if command -v agent-browser >/dev/null 2>&1; then agent-browser --cdp 9222 snapshot -i; elif [ -x /home/anurag/bin/agent-browser ]; then /home/anurag/bin/agent-browser --cdp 9222 snapshot -i; else npx -y agent-browser --cdp 9222 snapshot -i; fi'`
+  const snapRes = await executeDesktopCommand(snapCmd).catch(() => ({
+    stdout: "",
+    stderr: "",
+  }))
+  const snapshot = (snapRes.stdout || "")
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .replace(/^⚠ Chrome.*$/gm, "")
+    .replace(/^\[agent-browser\].*$/gm, "")
+    .trim()
+
+  return {
+    success: true,
+    url: targetUrl,
+    snapshot: snapshot || "Interactive elements tree ready.",
+    instruction:
+      "Use browser_click and browser_fill with the @eN refs above to interact with this page. NEVER use mouse_click.",
+    navigatedExisting,
+  }
 }
 
 /**

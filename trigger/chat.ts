@@ -1,3 +1,9 @@
+import * as dns from "node:dns/promises"
+import {
+  fetchLiveFundingFeed,
+  verifyDomainMx,
+  buildLinkedInXRayUrl,
+} from "@/lib/funding-hunter"
 import { chat } from "@trigger.dev/sdk/ai"
 import { google } from "@ai-sdk/google"
 import { tool, isStepCount } from "ai"
@@ -6,6 +12,19 @@ import { eq } from "drizzle-orm"
 import { bots, chatMembers, chats } from "@/lib/db/schema"
 import { getDb } from "@/lib/neon-db"
 import { getDaytonaClient } from "@/lib/daytona"
+import {
+  executeSandboxBrowserCommand,
+  executeDesktopBrowserCommand,
+} from "@/lib/browser-agent"
+import {
+  executeFundingSweep,
+} from "@/actions/job-hunter"
+import {
+  scrapeWebpage,
+  searchWeb,
+  searchFounderLinkedIn,
+  isFirecrawlConfigured,
+} from "@/lib/firecrawl"
 import {
   isDesktopConfigured,
   executeDesktopCommand,
@@ -107,19 +126,40 @@ export function buildAgentInstructions(params: {
       ].join("\n")
     : ""
 
-  const computerUseGuidance = hasEnv
-    ? [
-        `# Computer Use & Desktop Environment`,
-        `- You are running with full desktop control on Linux (DISPLAY=:0).`,
-        `- To browse the web or visit any site, ALWAYS use the \`open_browser\` tool.`,
-        `- When asked to search for something on the web, directly pass the search results URL to \`open_browser\` (e.g. \`https://duckduckgo.com/?q=...\` or \`https://www.google.com/search?q=...\`) to immediately reach the results without wasting turns typing into a blank homepage.`,
-        `- Follow this execution loop when asked to perform a browser or desktop task:`,
-        `  1. Call \`open_browser\` with the target or search URL.`,
-        `  2. Call \`view_screen\` to inspect the desktop visually if further clicks or interactions are required.`,
-        `  3. Use \`mouse_click(x, y)\`, \`keyboard_type(text)\`, and \`keyboard_press(key)\` to interact with buttons or dismiss popups based on coordinates in the screenshot.`,
-        `  4. When the page is ready or whenever the user asks for a screenshot, ALWAYS call \`show_screen\` so the image is rendered to the user in the chat, then provide a helpful summary of what you found.`,
-      ].join("\n")
-    : ""
+  const computerUseGuidance = [
+    `# Web Browsing, Research & Desktop Automation Protocol`,
+    `- TIER 1 (Fast Web Scraping & Research - DEFAULT): For reading websites, articles, company landing pages, checking team/about pages, or searching the web, ALWAYS use \`web_scrape\`, \`web_search\`, and \`find_founder_linkedin\` first. These tools bypass Cloudflare and anti-bot screens, returning clean Markdown in 1 step without opening an interactive browser or wasting steps.`,
+    hasEnv
+      ? `- TIER 2 (Direct-UI Desktop Automation - Actions Only): You also have full desktop control on Linux (DISPLAY=:0) with Chrome DevTools Protocol (CDP port 9222). Use \`open_browser\`, \`browser_click\`, and desktop tools when you need to interact with local apps, perform actions in an authenticated session (e.g. sending a message), or when the user specifically asks to see the browser window via \`show_screen\`.`
+      : "",
+    hasEnv
+      ? [
+          ``,
+          `### Authentic Direct-UI Navigation Protocol (When using the Desktop Browser):`,
+          `- AUTHENTIC UI NAVIGATION RULE: When asked to interact with a specific platform (such as Wellfound, LinkedIn, Apollo, GitHub, etc.) on the desktop, stay on that website and operate its actual UI controls using \`browser_click(ref)\` and \`browser_fill(ref, text)\`.`,
+          `- DROPDOWN & FILTER LOOP: Clicking a dropdown or filter button opens a menu in the DOM. Call \`browser_snapshot\` after clicking a dropdown trigger to see the newly rendered menu options, then call \`browser_click\` on the desired option.`,
+          `- LOGIN / CAPTCHA HANDOFF: If \`browser_snapshot\` shows a Sign-In wall or Cloudflare challenge blocking the website, call \`show_screen\` and tell the user in chat: "Please log into [Site] on the live desktop monitor on the right, then reply Done so I can continue."`,
+          `- PERSISTENT PROFILES: Your Chromium browser runs with a persistent profile. Any site you or the user log into remains permanently saved across tasks.`,
+          `- ZERO HALLUCINATION POLICY: NEVER invent or mock data. Every single contact MUST come from verified profiles on the target platform.`,
+        ].join("\n")
+      : "",
+    ``,
+    `### Funded-Startup & Lead Scout Pipeline:`,
+    `- When tasked with finding funded startups, company leads, or executive contacts:`,
+    `  1. STRICT RECENCY ENFORCEMENT: The user explicitly requires freshly announced or rumoured startups from the LAST 5 TO 7 DAYS (past week) or LAST 48 HOURS. NEVER provide older startups from past months or years unless explicitly requested. Always pass timeframe="7d" (or "48h").`,
+    `  2. RUMOURED / IN TALKS: If the user asks for rumoured or expected raises, actively search for startups 'in talks to raise', 'expected to close round', or 'seeking funding' in the past week alongside confirmed rounds.`,
+    `  3. DELIBERATE FULL INTEL: When asked deliberately for complete info on any startup, call \`get_startup_full_intel(companyName)\` to fetch everything: product overview, tech stack, funding timeline, real founder LinkedIn URLs, and deliverable email.`,
+    `  4. SWEEP: Call \`sweep_funded_startups\` with timeframe="7d" to fetch real companies that announced Seed, Series A, or venture rounds in the past week from live funding feeds.`,
+    `  5. X-RAY RADAR: For each target startup, call \`find_founder_linkedin(companyName)\` to instantly retrieve real founder/CTO names, titles, and direct LinkedIn profile URLs without CAPTCHA blocks. If visual browser display on screen is needed, call \`search_linkedin_xray(companyName)\`.`,
+    `  6. COMPANY INTEL: Call \`web_scrape(domain)\` to read their real product offerings, tech stack, and careers page in 1 step.`,
+    `  7. DELIVERABILITY CHECK: Call \`verify_founder_email(domain, founderName)\` to run real DNS MX lookups (Google Workspace, Microsoft 365) and check public GitHub commits so emails never bounce.`,
+    `  8. PERSIST LEADS: Append all verified contacts to \`leads.csv\` via \`write_file(path="leads.csv", content=...)\`.`,
+    `  9. VOICE & CARDS: Output clean conversational cards (### 🏢 Company — Funding Amount, * **Announced:** Timeframe [Confirmed / Rumour], * **Founder:** Name (Title), * **Email:** verified@domain [MX Verified], * **Outreach Pitch:** ...). Call \`show_screen\` to show the desktop preview if requested.`,
+    `- STAGE 3 (File Storage): Save all genuine leads into \`leads.csv\` using \`write_file\`.`,
+    `- STAGE 4 (Audible & User-Friendly Presentation): NEVER output raw wide Markdown pipe tables (| col | col |) — they sound atrocious when read aloud by voice synthesis. Instead, lead with a natural 1-2 sentence spoken executive summary, followed by clean visual cards (### 🏢 Company Name, * **Lead:** Name — Title, * **Email:** ..., * **LinkedIn:** ...). Call \`show_screen\` to display your browser screen to the user.`,
+  ]
+    .filter(Boolean)
+    .join("\n")
 
   let directChatGuidance = ""
   if (!params.isGroup) {
@@ -356,33 +396,583 @@ async function getActiveSandbox(sandboxId: string) {
 }
 
 /**
- * Creates all computer-use and filesystem tools bound to a specific Daytona sandbox.
- * All tools are server-side only — they run in Trigger.dev, never in the browser.
+ * Creates tools powered by Firecrawl for fast, 1-step web scraping and search.
+ * Works independently of any physical desktop or sandbox.
  */
-function makeSandboxTools(sandboxId: string) {
+function makeFirecrawlTools() {
   return {
-    open_browser: tool({
+    web_scrape: tool({
       description:
-        "Open the Chromium web browser on the desktop to a specific URL. If the user asks to search for something (e.g. 'search code with antonio'), directly navigate to the search URL (e.g. 'https://duckduckgo.com/?q=code+with+antonio') to immediately load the results without needing manual typing.",
+        "Fast, 1-step web scraper powered by Firecrawl. Automatically extracts clean Markdown from any website URL, bypassing Cloudflare, CAPTCHAs, and anti-bot protections. Use this as your primary tool to read web pages, company about/careers pages, and articles without needing a browser window.",
       inputSchema: z.object({
         url: z
           .string()
-          .default("https://duckduckgo.com")
+          .describe(
+            "The URL to scrape (e.g. 'https://example.com' or 'example.com/about')"
+          ),
+      }),
+      execute: async ({ url }: { url: string }) => {
+        return scrapeWebpage(url)
+      },
+    }),
+
+    web_search: tool({
+      description:
+        "Live web search powered by Firecrawl. Searches the web and returns clean text results, links, and content without CAPTCHAs. Use this to find news, funding announcements, or company information in 1 step. Defaults to fresh results from the past week.",
+      inputSchema: z.object({
+        query: z.string().describe("The search query"),
+        timeframe: z
+          .enum(["48h", "7d", "30d", "all"])
+          .default("7d")
+          .describe("Timeframe filter. Default '7d' (past 5-7 days / past week). Use '48h' for yesterday/today."),
+        limit: z
+          .number()
+          .default(5)
+          .describe("Maximum number of results to return (default: 5)"),
+      }),
+      execute: async ({
+        query,
+        timeframe,
+        limit,
+      }: {
+        query: string
+        timeframe?: "48h" | "7d" | "30d" | "all"
+        limit?: number
+      }) => {
+        const tbs =
+          timeframe === "48h"
+            ? "qdr:d"
+            : timeframe === "7d" || !timeframe
+            ? "qdr:w"
+            : timeframe === "30d"
+            ? "qdr:m"
+            : undefined
+        return searchWeb(query, { limit: limit ?? 5, tbs })
+      },
+    }),
+
+    get_startup_full_intel: tool({
+      description:
+        "Fetches comprehensive 360-degree intelligence on any startup: official domain, what the product does (via Firecrawl scrape), all discovered founders & executive LinkedIn profiles, funding history/rumours, and predicted deliverable email contacts.",
+      inputSchema: z.object({
+        companyName: z.string().describe("Name of the company or startup (e.g. 'OpenRouter', 'StepSecurity', 'Cognition')"),
+        domain: z.string().optional().describe("Known domain if available (e.g. 'openrouter.ai')"),
+      }),
+      execute: async ({ companyName, domain }: { companyName: string; domain?: string }) => {
+        let cleanDomain = domain
+          ? domain.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").trim()
+          : ""
+
+        // 1. Resolve domain if not given
+        if (!cleanDomain) {
+          const search = await searchWeb(`${companyName} official website`, { limit: 3 })
+          if (search.success && search.results.length > 0) {
+            const firstValid = search.results.find((r) => !r.url.includes("linkedin.com") && !r.url.includes("wikipedia.org"))
+            if (firstValid) {
+              cleanDomain = firstValid.url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "").trim()
+            }
+          }
+        }
+
+        // 2. Scrape product & company overview
+        let productSummary = ""
+        if (cleanDomain) {
+          try {
+            const scraped = await scrapeWebpage(`https://${cleanDomain}`)
+            if (scraped.success && scraped.markdown) {
+              productSummary = scraped.markdown.slice(0, 1500)
+            }
+          } catch (_) {}
+        }
+
+        // 3. Find key founders and leadership
+        const founderLookup = await searchFounderLinkedIn(companyName)
+        const profiles = founderLookup.success ? founderLookup.profiles : []
+
+        // 4. Recent funding or rumors
+        const news = await searchWeb(`${companyName} (funding OR round OR raises OR seed OR "series A") 2026`, { limit: 4, tbs: "qdr:m" })
+
+        return {
+          companyName,
+          domain: cleanDomain,
+          productSummary: productSummary || "Could not scrape product description directly.",
+          founders: profiles,
+          recentFundingNews: news.success ? news.results.map((r) => ({ title: r.title, url: r.url, snippet: r.description })) : [],
+          recommendedOutreachAngle: `Congratulate on recent momentum and pitch AI / full-stack engineering scalability.`,
+        }
+      },
+    }),
+
+    find_founder_linkedin: tool({
+      description:
+        "Finds real LinkedIn profile URLs for founders, co-founders, or executive leadership of a specific company via Firecrawl anti-bot search. Returns the exact LinkedIn URLs, names, and titles without Google CAPTCHAs.",
+      inputSchema: z.object({
+        companyName: z
+          .string()
+          .describe(
+            "Company or startup name, e.g. 'Athena' or 'StepSecurity'"
+          ),
+        role: z
+          .string()
+          .optional()
+          .describe("Optional specific role filter (e.g. 'CTO' or 'CEO')"),
+      }),
+      execute: async ({
+        companyName,
+        role,
+      }: {
+        companyName: string
+        role?: string
+      }) => {
+        return searchFounderLinkedIn(
+          companyName,
+          role ? `("${role}")` : undefined
+        )
+      },
+    }),
+  }
+}
+
+/**
+ * Creates all computer-use and filesystem tools bound to a specific Daytona sandbox.
+ * All tools are server-side only — they run in Trigger.dev, never in the browser.
+ */
+function makeSandboxTools(sandboxId: string, userId?: string, botId?: string) {
+  return {
+    open_browser: tool({
+      description:
+        "Open the Chromium web browser on the desktop to a specific URL. Automatically returns the accessibility DOM snapshot with @eN element references for immediate browser_click and browser_fill.",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .default("https://wellfound.com/jobs")
           .describe("URL to navigate to"),
       }),
       execute: async ({ url }: { url: string }) => {
         const sandbox = await getActiveSandbox(sandboxId)
         const targetUrl = url.startsWith("http") ? url : `https://${url}`
-        await sandbox.process.executeCommand(
-          `export DISPLAY=:0; nohup chromium --no-sandbox --start-maximized --no-first-run --no-default-browser-check --disable-fre --disable-search-engine-choice-screen "${targetUrl}" </dev/null >/dev/null 2>&1 &`
+        const profileDir = "/tmp/jarvis-chrome-profile"
+
+        // Check if Chromium is already active with port 9222 listening in sandbox
+        const cdpCheck = await sandbox.process
+          .executeCommand(
+            "curl -s --connect-timeout 1 http://127.0.0.1:9222/json/version"
+          )
+          .catch(() => ({ exitCode: 1, result: "" }))
+
+        let navigatedExisting = false
+        if (
+          cdpCheck.exitCode === 0 &&
+          (cdpCheck.result || "").includes("Browser")
+        ) {
+          const navRes = await executeSandboxBrowserCommand(
+            sandbox,
+            `open "${targetUrl}"`
+          )
+          if (navRes.success) {
+            navigatedExisting = true
+          }
+        }
+
+        if (!navigatedExisting) {
+          // Kill any stale non-CDP Chromium instance
+          await sandbox.process
+            .executeCommand("pkill -f chromium 2>/dev/null || true")
+            .catch(() => {})
+
+          // Remove any stale SingletonLock only when Chromium is not running on port 9222
+          await sandbox.process
+            .executeCommand(
+              `mkdir -p "${profileDir}" && rm -f "${profileDir}/SingletonLock" "${profileDir}/SingletonSocket" "${profileDir}/SingletonCookie" 2>/dev/null || true`
+            )
+            .catch(() => {})
+
+          await sandbox.process.executeCommand(
+            `export DISPLAY=:0; nohup chromium --no-sandbox --start-maximized --no-first-run --no-default-browser-check --disable-session-crashed-bubble --disable-infobars --disable-fre --disable-search-engine-choice-screen --user-data-dir="${profileDir}" --remote-debugging-port=9222 "${targetUrl}" </dev/null >/dev/null 2>&1 &`
+          )
+        }
+
+        // Give the window 2.2 seconds to render on screen
+        await new Promise((res) => setTimeout(res, 2200))
+
+        // Auto-return the accessibility DOM snapshot so the model gets @eN element refs on Step 1
+        const snapRes = await executeSandboxBrowserCommand(
+          sandbox,
+          "snapshot -i"
         )
-        // Give the window 2.5 seconds to render on screen
-        await new Promise((res) => setTimeout(res, 2500))
         return {
           success: true,
           url: targetUrl,
+          snapshot: snapRes.output || "Interactive elements tree ready.",
           instruction:
-            "Chromium has opened. Now call view_screen to inspect the page layout, find buttons or inputs to interact with, and call show_screen when ready to display the result to the user.",
+            "Use browser_click and browser_fill with the @eN refs above to interact with this page. NEVER use mouse_click.",
+        }
+      },
+    }),
+    browser_snapshot: tool({
+      description:
+        "Take an accessibility/DOM snapshot of the current Chromium web page. Returns an interactive tree of elements with reference IDs (e.g. @e1, @e2, @e3). Call this after open_browser or after any click to inspect exact element refs.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const sandbox = await getActiveSandbox(sandboxId)
+        const res = await executeSandboxBrowserCommand(sandbox, "snapshot -i")
+        return {
+          snapshot: res.output || "No interactive elements found",
+          instruction:
+            "Use the @eN refs from this snapshot with browser_click or browser_fill.",
+        }
+      },
+    }),
+
+    browser_click: tool({
+      description:
+        "Click an element in the Chromium browser using its exact reference ID from browser_snapshot (e.g. '@e3'). 100% reliable.",
+      inputSchema: z.object({
+        ref: z.string().describe("The element ref (e.g. '@e3')"),
+      }),
+      execute: async ({ ref }: { ref: string }) => {
+        const sandbox = await getActiveSandbox(sandboxId)
+        const res = await executeSandboxBrowserCommand(
+          sandbox,
+          `click "${ref}"`
+        )
+        return { success: res.success, output: res.output, error: res.error }
+      },
+    }),
+
+    browser_fill: tool({
+      description:
+        "Clear and fill text into an input or textarea element by its reference ID from browser_snapshot (e.g. '@e2').",
+      inputSchema: z.object({
+        ref: z.string().describe("The element ref (e.g. '@e2')"),
+        text: z.string().describe("Text to fill into the input"),
+      }),
+      execute: async ({ ref, text }: { ref: string; text: string }) => {
+        const sandbox = await getActiveSandbox(sandboxId)
+        const escaped = text.replace(/"/g, '\\"')
+        const res = await executeSandboxBrowserCommand(
+          sandbox,
+          `fill "${ref}" "${escaped}"`
+        )
+        return { success: res.success, output: res.output, error: res.error }
+      },
+    }),
+
+    browser_press: tool({
+      description:
+        "Press a key (e.g. 'Enter', 'Tab', 'Escape') in the browser.",
+      inputSchema: z.object({
+        key: z
+          .string()
+          .describe("Key name to press, e.g. 'Enter', 'Tab', 'Escape'"),
+      }),
+      execute: async ({ key }: { key: string }) => {
+        const sandbox = await getActiveSandbox(sandboxId)
+        const res = await executeSandboxBrowserCommand(
+          sandbox,
+          `press "${key}"`
+        )
+        return { success: res.success, output: res.output }
+      },
+    }),
+
+    browser_get_text: tool({
+      description:
+        "Extract the text content of a specific element by ref from browser_snapshot.",
+      inputSchema: z.object({
+        ref: z.string().describe("The element ref (e.g. '@e1')"),
+      }),
+      execute: async ({ ref }: { ref: string }) => {
+        const sandbox = await getActiveSandbox(sandboxId)
+        const res = await executeSandboxBrowserCommand(
+          sandbox,
+          `get text "${ref}"`
+        )
+        return { text: res.output }
+      },
+    }),
+
+    sweep_funded_startups: tool({
+      description:
+        "Sweeps live funding news for real startups that announced Seed, Series A, or venture rounds recently (strictly within the specified timeframe, default 5-7 days / past week). Uses Firecrawl web search (primary) for rich, accurate results, falling back to RSS feeds. Returns company names, funding amounts, headlines, domains, and article URLs.",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .default("AI startup raises Seed OR 'Series A' OR 'in talks to raise' funding 2026")
+          .describe("Search query for funded startups (e.g. 'AI startup raises Seed funding 2026' or 'India startup Series A 2026')"),
+        timeframe: z
+          .enum(["48h", "7d", "30d"])
+          .default("7d")
+          .describe("Recency window. Default '7d' (past 5-7 days / past week). Use '48h' for yesterday/today."),
+        includeRumours: z
+          .boolean()
+          .default(true)
+          .describe("Include rumoured, leaking, or in-talks raises alongside confirmed rounds."),
+        limit: z
+          .number()
+          .default(5)
+          .describe("Max number of startups to return (default: 5)"),
+      }),
+      execute: async ({
+        query,
+        timeframe = "7d",
+        includeRumours = true,
+        limit = 5,
+      }: {
+        query: string
+        timeframe?: "48h" | "7d" | "30d"
+        includeRumours?: boolean
+        limit?: number
+      }) => {
+        // Preferred: Full end-to-end radar with verified founders and outreach drafts
+        if (userId) {
+          try {
+            const sweepRes = await executeFundingSweep({
+              customUrl: query,
+              timeframe,
+              includeRumours,
+              limit,
+              userId,
+              botId,
+            })
+            if (sweepRes.success && sweepRes.leads.length > 0) {
+              return {
+                count: sweepRes.leads.length,
+                source: "firecrawl",
+                timeframe,
+                startups: sweepRes.leads,
+                instruction: `Found ${sweepRes.leads.length} fresh startups with verified founders and outreach drafts. Tell the user warmly about the results and let the interactive cards display the details.`,
+              }
+            }
+          } catch (e) {
+            console.warn("executeFundingSweep failed, falling back to raw search:", e)
+          }
+        }
+
+        const tbs =
+          timeframe === "48h" ? "qdr:d" : timeframe === "7d" ? "qdr:w" : "qdr:m"
+
+        // Primary: Firecrawl web search - richer article content, no CAPTCHA
+        if (isFirecrawlConfigured()) {
+          try {
+            const finalQuery = includeRumours && !query.includes("in talks")
+              ? `${query} OR "in talks to raise"`
+              : query
+            const fcRes = await searchWeb(finalQuery, { limit, tbs })
+            if (fcRes.success && fcRes.results.length > 0) {
+              return {
+                count: fcRes.results.length,
+                source: "firecrawl",
+                timeframe,
+                startups: fcRes.results.map((r) => ({
+                  headline: r.title,
+                  articleUrl: r.url,
+                  description: r.description || r.markdown?.slice(0, 300),
+                })),
+                instruction:
+                  "Found recent funding news from the past week. Now for each startup: 1) call find_founder_linkedin(companyName) to get real founder profiles, 2) call web_scrape(domain) to read their product details, 3) call verify_founder_email(domain, founderName) to confirm email deliverability.",
+              }
+            }
+          } catch (e) {
+            console.warn("Firecrawl sweep failed, falling back to RSS:", e)
+          }
+        }
+        // Fallback: RSS
+        const startups = await fetchLiveFundingFeed(query)
+        return {
+          count: startups.length,
+          source: "rss",
+          timeframe,
+          startups,
+          instruction:
+            "Found recently funded startups from RSS. Now for each: 1) call find_founder_linkedin(companyName), 2) call web_scrape(domain) to read their product details, 3) call verify_founder_email(domain, founderName).",
+        }
+      },
+    }),
+
+    search_linkedin_xray: tool({
+      description:
+        "Opens Google LinkedIn X-Ray search on Chromium (DISPLAY=:0) inside the sandbox to find founders, co-founders, or CTOs for a specific startup. Also queries Firecrawl in parallel for verified profile URLs.",
+      inputSchema: z.object({
+        companyName: z.string().describe("Target startup name (e.g. 'Athena AI' or 'Perplexity')"),
+        role: z
+          .string()
+          .default("Founder OR Co-Founder OR CTO")
+          .describe("Target role filter, e.g. 'Founder OR CTO' or 'HR OR Recruiter'"),
+      }),
+      execute: async ({
+        companyName,
+        role,
+      }: {
+        companyName: string
+        role: string
+      }) => {
+        const xrayUrl = buildLinkedInXRayUrl(companyName, role)
+        const profileDir = "/tmp/jarvis-chrome-profile"
+        const sandbox = await getActiveSandbox(sandboxId)
+
+        const cdpCheck = await sandbox.process
+          .executeCommand(
+            "curl -s --connect-timeout 1 http://127.0.0.1:9222/json/version"
+          )
+          .catch(() => ({ exitCode: 1, result: "" }))
+
+        let navigatedExisting = false
+        if (
+          cdpCheck.exitCode === 0 &&
+          (cdpCheck.result || "").includes("Browser")
+        ) {
+          const navRes = await executeSandboxBrowserCommand(
+            sandbox,
+            `open "${xrayUrl}"`
+          )
+          if (navRes.success) {
+            navigatedExisting = true
+          }
+        }
+
+        if (!navigatedExisting) {
+          await sandbox.process
+            .executeCommand("pkill -f chromium 2>/dev/null || true")
+            .catch(() => {})
+          await sandbox.process
+            .executeCommand(
+              `mkdir -p "${profileDir}" && rm -f "${profileDir}/SingletonLock" "${profileDir}/SingletonSocket" "${profileDir}/SingletonCookie" 2>/dev/null || true`
+            )
+            .catch(() => {})
+          await sandbox.process.executeCommand(
+            `export DISPLAY=:0; nohup chromium --no-sandbox --test-type --disable-infobars --start-maximized --no-first-run --no-default-browser-check --disable-session-crashed-bubble --disable-search-engine-choice-screen --user-data-dir="${profileDir}" --remote-debugging-port=9222 "${xrayUrl}" </dev/null >/dev/null 2>&1 &`
+          )
+        }
+
+        await sandbox.process
+          .executeCommand(
+            "export DISPLAY=:0; wmctrl -a Chromium 2>/dev/null || wmctrl -a google-chrome 2>/dev/null || true"
+          )
+          .catch(() => {})
+
+        await new Promise((res) => setTimeout(res, 2200))
+        const snapRes = await executeSandboxBrowserCommand(sandbox, "snapshot -i")
+
+        let verifiedProfiles = undefined
+        if (isFirecrawlConfigured()) {
+          try {
+            const fcRes = await searchFounderLinkedIn(companyName, role ? `("${role}")` : undefined)
+            if (fcRes.success && fcRes.profiles.length > 0) {
+              verifiedProfiles = fcRes.profiles
+            }
+          } catch {}
+        }
+
+        return {
+          success: true,
+          companyName,
+          xrayUrl,
+          verifiedProfiles,
+          snapshot: snapRes.output,
+          instruction:
+            "Opened LinkedIn X-Ray search on Chromium (DISPLAY=:0). Verified founder profiles are provided above. You can also inspect the desktop snapshot or click a result using browser_click.",
+        }
+      },
+    }),
+
+    open_funding_or_xray_in_chromium: tool({
+      description:
+        "Launches Chromium on DISPLAY=:0 inside your bot's container with the TechCrunch/Inc42 funding page or Google LinkedIn X-Ray search, then brings the window to focus with wmctrl -a Chromium.",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .describe(
+            "URL to open in Chromium (e.g. Google LinkedIn X-Ray query or funding article)"
+          ),
+      }),
+      execute: async ({ url }: { url: string }) => {
+        const sandbox = await getActiveSandbox(sandboxId)
+        const targetUrl = url.startsWith("http") ? url : `https://${url}`
+        const profileDir = "/tmp/jarvis-chrome-profile"
+
+        const cdpCheck = await sandbox.process
+          .executeCommand(
+            "curl -s --connect-timeout 1 http://127.0.0.1:9222/json/version"
+          )
+          .catch(() => ({ exitCode: 1, result: "" }))
+
+        let navigatedExisting = false
+        if (
+          cdpCheck.exitCode === 0 &&
+          (cdpCheck.result || "").includes("Browser")
+        ) {
+          const navRes = await executeSandboxBrowserCommand(
+            sandbox,
+            `open "${targetUrl}"`
+          )
+          if (navRes.success) {
+            navigatedExisting = true
+          }
+        }
+
+        if (!navigatedExisting) {
+          await sandbox.process
+            .executeCommand("pkill -f chromium 2>/dev/null || true")
+            .catch(() => {})
+          await sandbox.process
+            .executeCommand(
+              `mkdir -p "${profileDir}" && rm -f "${profileDir}/SingletonLock" "${profileDir}/SingletonSocket" "${profileDir}/SingletonCookie" 2>/dev/null || true`
+            )
+            .catch(() => {})
+          await sandbox.process.executeCommand(
+            `export DISPLAY=:0; nohup chromium --no-sandbox --test-type --disable-infobars --start-maximized --no-first-run --no-default-browser-check --disable-session-crashed-bubble --disable-search-engine-choice-screen --user-data-dir="${profileDir}" --remote-debugging-port=9222 "${targetUrl}" </dev/null >/dev/null 2>&1 &`
+          )
+        }
+
+        await sandbox.process
+          .executeCommand(
+            "export DISPLAY=:0; wmctrl -a Chromium 2>/dev/null || wmctrl -a google-chrome 2>/dev/null || true"
+          )
+          .catch(() => {})
+
+        await new Promise((res) => setTimeout(res, 2000))
+        const snapRes = await executeSandboxBrowserCommand(sandbox, "snapshot -i")
+        return {
+          success: true,
+          url: targetUrl,
+          snapshot: snapRes.output,
+          instruction:
+            "Opened Chromium on DISPLAY=:0 and focused the window in the container.",
+        }
+      },
+    }),
+
+    verify_founder_email: tool({
+      description:
+        "Runs real-time DNS MX lookups (Google Workspace, Microsoft 365) and queries public GitHub commits so your bot never recommends an invalid or bouncing email.",
+      inputSchema: z.object({
+        domain: z.string().describe("The startup domain name, e.g. 'stepsecurity.io' or 'linear.app'"),
+        founderName: z
+          .string()
+          .default("Founder")
+          .describe("The founder or decision maker's name, e.g. 'Varun Sharma'"),
+      }),
+      execute: async ({
+        domain,
+        founderName,
+      }: {
+        domain: string
+        founderName: string
+      }) => {
+        const result = await verifyDomainMx(domain, founderName)
+        return {
+          domain: result.domain,
+          founderName,
+          mxVerified: result.hasLiveMx,
+          topExchange: result.topExchange,
+          provider: result.provider,
+          recommendedEmail: result.recommendedEmail,
+          fallbackEmails: result.fallbackEmails,
+          githubCommitEmail: result.githubCommitEmail,
+          status: result.hasLiveMx
+            ? `Domain active with live ${result.provider} mail servers (${result.topExchange})`
+            : "No MX records found for domain",
         }
       },
     }),
@@ -478,7 +1068,7 @@ function makeSandboxTools(sandboxId: string) {
 
     mouse_click: tool({
       description:
-        "Click the mouse at the given screen coordinates in the sandbox desktop.",
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For all web pages, dropdowns, filters, and inputs, ALWAYS use browser_click, browser_fill, and browser_press with @eN refs.",
       inputSchema: z.object({
         x: z.number().describe("X coordinate"),
         y: z.number().describe("Y coordinate"),
@@ -511,7 +1101,8 @@ function makeSandboxTools(sandboxId: string) {
     }),
 
     mouse_move: tool({
-      description: "Move the mouse cursor to the given coordinates.",
+      description:
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For all web pages, dropdowns, filters, and inputs, ALWAYS use browser_click, browser_fill, and browser_press with @eN refs.",
       inputSchema: z.object({
         x: z.number().describe("X coordinate"),
         y: z.number().describe("Y coordinate"),
@@ -524,7 +1115,8 @@ function makeSandboxTools(sandboxId: string) {
     }),
 
     mouse_scroll: tool({
-      description: "Scroll the mouse wheel at the given coordinates.",
+      description:
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For scrolling web pages, use browser_press with 'Page_Down' or 'Page_Up', or browser_scroll.",
       inputSchema: z.object({
         x: z.number().describe("X coordinate to scroll at"),
         y: z.number().describe("Y coordinate to scroll at"),
@@ -555,7 +1147,7 @@ function makeSandboxTools(sandboxId: string) {
 
     keyboard_type: tool({
       description:
-        "Type text into the currently focused element in the sandbox desktop.",
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For typing into web forms and search bars, ALWAYS use browser_fill with the @eN ref.",
       inputSchema: z.object({
         text: z.string().describe("Text to type"),
       }),
@@ -667,24 +1259,288 @@ function makeSandboxTools(sandboxId: string) {
  * Creates all computer-use and filesystem tools bound to the physical Ubuntu desktop (Acer Veriton).
  * Executes commands natively over the local network via HTTP listener.
  */
-function makeDesktopTools() {
+function makeDesktopTools(userId?: string, botId?: string) {
   return {
     open_browser: tool({
       description:
-        "Open the Chromium web browser on the physical Ubuntu desktop to a specific URL. If the user asks to search for something, directly navigate to the search URL (e.g. 'https://duckduckgo.com/?q=...').",
+        "Open the Chromium web browser on the physical Ubuntu desktop to a specific URL. Automatically returns the accessibility DOM snapshot with @eN element references for immediate browser_click and browser_fill.",
       inputSchema: z.object({
         url: z
           .string()
-          .default("https://duckduckgo.com")
+          .default("https://wellfound.com/jobs")
           .describe("URL to navigate to"),
       }),
       execute: async ({ url }: { url: string }) => {
-        const res = await openDesktopBrowser(url)
+        return openDesktopBrowser(url)
+      },
+    }),
+    browser_snapshot: tool({
+      description:
+        "Take an accessibility/DOM snapshot of the current Chromium web page. Returns an interactive tree of elements with reference IDs (e.g. @e1, @e2, @e3). Call this after open_browser or after any click to inspect exact element refs.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const res = await executeDesktopBrowserCommand("snapshot -i")
+        return {
+          snapshot: res.output || "No interactive elements found",
+          instruction:
+            "Use the @eN refs from this snapshot with browser_click or browser_fill.",
+        }
+      },
+    }),
+
+    browser_click: tool({
+      description:
+        "Click an element in the Chromium browser using its exact reference ID from browser_snapshot (e.g. '@e3'). 100% reliable.",
+      inputSchema: z.object({
+        ref: z.string().describe("The element ref (e.g. '@e3')"),
+      }),
+      execute: async ({ ref }: { ref: string }) => {
+        const res = await executeDesktopBrowserCommand(`click "${ref}"`)
+        return { success: res.success, output: res.output, error: res.error }
+      },
+    }),
+
+    browser_fill: tool({
+      description:
+        "Clear and fill text into an input or textarea element by its reference ID from browser_snapshot (e.g. '@e2').",
+      inputSchema: z.object({
+        ref: z.string().describe("The element ref (e.g. '@e2')"),
+        text: z.string().describe("Text to fill into the input"),
+      }),
+      execute: async ({ ref, text }: { ref: string; text: string }) => {
+        const escaped = text.replace(/"/g, '\\"')
+        const res = await executeDesktopBrowserCommand(
+          `fill "${ref}" "${escaped}"`
+        )
+        return { success: res.success, output: res.output, error: res.error }
+      },
+    }),
+
+    browser_press: tool({
+      description:
+        "Press a key (e.g. 'Enter', 'Tab', 'Escape') in the browser.",
+      inputSchema: z.object({
+        key: z
+          .string()
+          .describe("Key name to press, e.g. 'Enter', 'Tab', 'Escape'"),
+      }),
+      execute: async ({ key }: { key: string }) => {
+        const res = await executeDesktopBrowserCommand(`press "${key}"`)
+        return { success: res.success, output: res.output }
+      },
+    }),
+
+    browser_get_text: tool({
+      description:
+        "Extract the text content of a specific element by ref from browser_snapshot.",
+      inputSchema: z.object({
+        ref: z.string().describe("The element ref (e.g. '@e1')"),
+      }),
+      execute: async ({ ref }: { ref: string }) => {
+        const res = await executeDesktopBrowserCommand(`get text "${ref}"`)
+        return { text: res.output }
+      },
+    }),
+
+    sweep_funded_startups: tool({
+      description:
+        "Sweeps live funding news for real startups that announced Seed, Series A, or venture rounds recently (strictly within the specified timeframe, default 5-7 days / past week). Uses Firecrawl web search (primary) for rich, accurate results, falling back to RSS feeds. Returns company names, funding amounts, headlines, domains, and article URLs.",
+      inputSchema: z.object({
+        query: z
+          .string()
+          .default("AI startup raises Seed OR 'Series A' OR 'in talks to raise' funding 2026")
+          .describe("Search query for funded startups (e.g. 'AI startup raises Seed funding 2026' or 'India startup Series A 2026')"),
+        timeframe: z
+          .enum(["48h", "7d", "30d"])
+          .default("7d")
+          .describe("Recency window. Default '7d' (past 5-7 days / past week). Use '48h' for yesterday/today."),
+        includeRumours: z
+          .boolean()
+          .default(true)
+          .describe("Include rumoured, leaking, or in-talks raises alongside confirmed rounds."),
+        limit: z
+          .number()
+          .default(5)
+          .describe("Max number of startups to return (default: 5)"),
+      }),
+      execute: async ({
+        query,
+        timeframe = "7d",
+        includeRumours = true,
+        limit = 5,
+      }: {
+        query: string
+        timeframe?: "48h" | "7d" | "30d"
+        includeRumours?: boolean
+        limit?: number
+      }) => {
+        // Preferred: Full end-to-end radar with verified founders and outreach drafts
+        if (userId) {
+          try {
+            const sweepRes = await executeFundingSweep({
+              customUrl: query,
+              timeframe,
+              includeRumours,
+              limit,
+              userId,
+              botId,
+            })
+            if (sweepRes.success && sweepRes.leads.length > 0) {
+              return {
+                count: sweepRes.leads.length,
+                source: "firecrawl",
+                timeframe,
+                startups: sweepRes.leads,
+                instruction: `Found ${sweepRes.leads.length} fresh startups with verified founders and outreach drafts. Tell the user warmly about the results and let the interactive cards display the details.`,
+              }
+            }
+          } catch (e) {
+            console.warn("executeFundingSweep failed, falling back to raw search:", e)
+          }
+        }
+
+        const tbs =
+          timeframe === "48h" ? "qdr:d" : timeframe === "7d" ? "qdr:w" : "qdr:m"
+
+        // Primary: Firecrawl web search - richer article content, no CAPTCHA
+        if (isFirecrawlConfigured()) {
+          try {
+            const finalQuery = includeRumours && !query.includes("in talks")
+              ? `${query} OR "in talks to raise"`
+              : query
+            const fcRes = await searchWeb(finalQuery, { limit, tbs })
+            if (fcRes.success && fcRes.results.length > 0) {
+              return {
+                count: fcRes.results.length,
+                source: "firecrawl",
+                timeframe,
+                startups: fcRes.results.map((r) => ({
+                  headline: r.title,
+                  articleUrl: r.url,
+                  description: r.description || r.markdown?.slice(0, 300),
+                })),
+                instruction:
+                  "Found recent funding news from the past week. Now for each startup: 1) call find_founder_linkedin(companyName) to get real founder profiles, 2) call web_scrape(domain) to read their product details, 3) call verify_founder_email(domain, founderName) to confirm email deliverability.",
+              }
+            }
+          } catch (e) {
+            console.warn("Firecrawl sweep failed, falling back to RSS:", e)
+          }
+        }
+        // Fallback: RSS
+        const startups = await fetchLiveFundingFeed(query)
+        return {
+          count: startups.length,
+          source: "rss",
+          timeframe,
+          startups,
+          instruction:
+            "Found recently funded startups from RSS. Now for each: 1) call find_founder_linkedin(companyName), 2) call web_scrape(domain) to read their product details, 3) call verify_founder_email(domain, founderName).",
+        }
+      },
+    }),
+
+    search_linkedin_xray: tool({
+      description:
+        "Visually opens Chromium on DISPLAY=:0 with a targeted Google/DuckDuckGo LinkedIn X-Ray query to locate the Founder, Co-Founder, or CTO of a company without being blocked by LinkedIn login walls.",
+      inputSchema: z.object({
+        companyName: z.string().describe("Target company name, e.g. 'StepSecurity' or 'Composio'"),
+        role: z
+          .string()
+          .default("Founder OR Co-Founder OR CTO")
+          .describe("Target role filter, e.g. 'Founder OR CTO' or 'HR OR Recruiter'"),
+      }),
+      execute: async ({
+        companyName,
+        role,
+      }: {
+        companyName: string
+        role: string
+      }) => {
+        const xrayUrl = buildLinkedInXRayUrl(companyName, role)
+        const navRes = await openDesktopBrowser(xrayUrl)
+        await executeDesktopCommand(
+          "wmctrl -a Chromium 2>/dev/null || wmctrl -a google-chrome 2>/dev/null || true"
+        ).catch(() => {})
+
+        let verifiedProfiles = undefined
+        if (isFirecrawlConfigured()) {
+          try {
+            const fcRes = await searchFounderLinkedIn(companyName, role ? `("${role}")` : undefined)
+            if (fcRes.success && fcRes.profiles.length > 0) {
+              verifiedProfiles = fcRes.profiles
+            }
+          } catch {}
+        }
+
         return {
           success: true,
-          url: res.url,
+          companyName,
+          xrayUrl,
+          verifiedProfiles,
+          snapshot: navRes.snapshot,
           instruction:
-            "Chromium has opened on the physical desktop. Call view_screen to inspect the page layout, and call show_screen when ready to display the result to the user.",
+            "Opened LinkedIn X-Ray search on Chromium (DISPLAY=:0). Verified founder profiles are provided above. You can also inspect the desktop snapshot or click a result using browser_click.",
+        }
+      },
+    }),
+
+    open_funding_or_xray_in_chromium: tool({
+      description:
+        "Launches Chromium on DISPLAY=:0 inside your bot's container with the TechCrunch/Inc42 funding page or Google LinkedIn X-Ray search, then brings the window to focus with wmctrl -a Chromium.",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .describe(
+            "URL to open in Chromium (e.g. Google LinkedIn X-Ray query or funding article)"
+          ),
+      }),
+      execute: async ({ url }: { url: string }) => {
+        const targetUrl = url.startsWith("http") ? url : `https://${url}`
+        const navRes = await openDesktopBrowser(targetUrl)
+        await executeDesktopCommand(
+          "wmctrl -a Chromium 2>/dev/null || wmctrl -a google-chrome 2>/dev/null || true"
+        ).catch(() => {})
+        return {
+          success: true,
+          url: targetUrl,
+          snapshot: navRes.snapshot,
+          instruction:
+            "Opened Chromium on DISPLAY=:0 and focused the window. The user can view this live in their desktop preview.",
+        }
+      },
+    }),
+
+    verify_founder_email: tool({
+      description:
+        "Runs real-time DNS MX lookups (Google Workspace, Microsoft 365) and queries public GitHub commits so your bot never recommends an invalid or bouncing email.",
+      inputSchema: z.object({
+        domain: z.string().describe("The startup domain name, e.g. 'stepsecurity.io' or 'linear.app'"),
+        founderName: z
+          .string()
+          .default("Founder")
+          .describe("The founder or decision maker's name, e.g. 'Varun Sharma'"),
+      }),
+      execute: async ({
+        domain,
+        founderName,
+      }: {
+        domain: string
+        founderName: string
+      }) => {
+        const result = await verifyDomainMx(domain, founderName)
+        return {
+          domain: result.domain,
+          founderName,
+          mxVerified: result.hasLiveMx,
+          topExchange: result.topExchange,
+          provider: result.provider,
+          recommendedEmail: result.recommendedEmail,
+          fallbackEmails: result.fallbackEmails,
+          githubCommitEmail: result.githubCommitEmail,
+          status: result.hasLiveMx
+            ? `Domain active with live ${result.provider} mail servers (${result.topExchange})`
+            : "No MX records found for domain",
         }
       },
     }),
@@ -742,7 +1598,7 @@ function makeDesktopTools() {
 
     mouse_click: tool({
       description:
-        "Click the mouse at the given screen coordinates on the desktop.",
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For all web pages, dropdowns, filters, and inputs, ALWAYS use browser_click, browser_fill, and browser_press with @eN refs.",
       inputSchema: z.object({
         x: z.number().describe("X coordinate"),
         y: z.number().describe("Y coordinate"),
@@ -759,7 +1615,7 @@ function makeDesktopTools() {
 
     mouse_move: tool({
       description:
-        "Move the mouse cursor to the given coordinates on the desktop.",
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For all web pages, dropdowns, filters, and inputs, ALWAYS use browser_click, browser_fill, and browser_press with @eN refs.",
       inputSchema: z.object({
         x: z.number().describe("X coordinate"),
         y: z.number().describe("Y coordinate"),
@@ -771,7 +1627,7 @@ function makeDesktopTools() {
 
     mouse_scroll: tool({
       description:
-        "Scroll the mouse wheel at the given coordinates on the desktop.",
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For scrolling web pages, use browser_press with 'Page_Down' or 'Page_Up', or browser_scroll.",
       inputSchema: z.object({
         x: z.number().describe("X coordinate to scroll at"),
         y: z.number().describe("Y coordinate to scroll at"),
@@ -785,7 +1641,7 @@ function makeDesktopTools() {
 
     keyboard_type: tool({
       description:
-        "Type text into the currently focused element on the desktop.",
+        "NON-BROWSER LINUX DESKTOP FALLBACK ONLY — NEVER use this tool inside Chromium or on websites. For typing into web forms and search bars, ALWAYS use browser_fill with the @eN ref.",
       inputSchema: z.object({
         text: z.string().describe("Text to type"),
       }),
@@ -883,21 +1739,26 @@ export const chatAgent = chat.agent({
       (!sandboxId && isDesktopConfigured()) ||
       isDesktopConfigured()
 
+    const firecrawlTools = makeFirecrawlTools()
     const sandboxTools = isPhysical
-      ? makeDesktopTools()
+      ? makeDesktopTools(currentChat?.userId, currentBotId)
       : sandboxId
-        ? makeSandboxTools(sandboxId)
+        ? makeSandboxTools(sandboxId, currentChat?.userId, currentBotId)
         : {}
+    const baseTools = {
+      ...firecrawlTools,
+      ...sandboxTools,
+    }
     const isGroup = currentChat?.kind === "group" || memberBots.length > 1
 
     if (isGroup && memberBots.length > 1) {
       return {
-        ...sandboxTools,
+        ...baseTools,
         handoff: makeHandoffTool(memberBots, currentBotId),
       }
     }
 
-    return sandboxTools
+    return baseTools
   },
   run: async ({ messages, signal, streamText, chatId, clientData, tools }) => {
     const { chat: currentChat, bots: memberBots } = await getChatBots(chatId)
@@ -965,7 +1826,7 @@ export const chatAgent = chat.agent({
       instructions,
       messages,
       tools,
-      stopWhen: isStepCount(25),
+      stopWhen: isStepCount(60),
       maxRetries: 5,
       abortSignal: signal,
     })

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Monitor } from "lucide-react"
+import { Monitor, Rocket } from "lucide-react"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { BotDialog, type BotDialogBot } from "@/components/bot-dialog"
@@ -10,6 +10,7 @@ import {
   GroupChatDialog,
   type GroupChatDialogChat,
 } from "@/components/group-chat-dialog"
+import { JobHunterSheet } from "@/components/job-hunter-sheet"
 import { Button } from "@/components/ui/button"
 import type { ChatWithBot } from "@/chats/queries"
 import type { Bot, Chat } from "@/lib/db/schema"
@@ -49,6 +50,8 @@ export function ChatHeader({
   const pathname = usePathname()
   const searchParams = useSearchParams()
 
+  const [jobHunterOpen, setJobHunterOpen] = React.useState(false)
+
   const isGroup =
     ("kind" in chat && chat.kind === "group") ||
     Boolean(chat.members && chat.members.length > 1)
@@ -87,14 +90,16 @@ export function ChatHeader({
   const [currentGroupName, setCurrentGroupName] = React.useState<string | null | undefined>(
     isGroup ? chat.name : null
   )
+  const [prevChat, setPrevChat] = React.useState(chat)
 
-  React.useEffect(() => {
+  if (chat !== prevChat) {
+    setPrevChat(chat)
     if (!isGroup) {
       setCurrentBot(firstMember?.bot ?? chat.bot)
     } else {
       setCurrentGroupName(chat.name)
     }
-  }, [chat, firstMember?.bot, isGroup])
+  }
 
   const title = isGroup
     ? currentGroupName || chat.name || "Group Chat"
@@ -214,8 +219,26 @@ export function ChatHeader({
         </div>
       )}
 
-      {!isGroup && (
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          onClick={() => setJobHunterOpen(true)}
+          className="cursor-pointer"
+        >
+          <Rocket data-icon="inline-start" />
+          Radar & Leads
+        </Button>
+
+        <JobHunterSheet
+          open={jobHunterOpen}
+          onOpenChange={setJobHunterOpen}
+          botId={currentBot?.id}
+          botContainerName={currentBot?.name || undefined}
+        />
+
+        {!isGroup && (
           <Button
             variant={isDesktop ? "secondary" : "ghost"}
             size="icon-sm"
@@ -228,8 +251,8 @@ export function ChatHeader({
             <Monitor />
             <span className="sr-only">Desktop</span>
           </Button>
-        </div>
-      )}
+        )}
+      </div>
     </header>
   )
 }

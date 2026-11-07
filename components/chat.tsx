@@ -7,7 +7,23 @@ import {
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage, ToolUIPart, DynamicToolUIPart } from "ai"
-import { ArrowRightLeft, Check, Volume2, VolumeX } from "lucide-react"
+import {
+  ArrowRightLeft,
+  Calendar,
+  Check,
+  CheckCircle2,
+  Clock,
+  Copy,
+  ExternalLink,
+  Mail,
+  MessageSquare,
+  Rocket,
+  Search,
+  Sparkles,
+  Volume2,
+  VolumeX,
+} from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SpeechInput } from "@/components/ai-elements/speech-input"
 import { useJarvisVoice } from "@/hooks/use-jarvis-voice"
 import { toast } from "@/components/ui/toast"
@@ -409,6 +425,455 @@ function HandoffToolPart({
   )
 }
 
+function StartupLeadsToolPart({
+  part,
+  onSendPrompt,
+}: {
+  part: ToolUIPart
+  onSendPrompt?: (text: string) => void
+}) {
+  const isReady = part.state === "output-available"
+  const isError = part.state === "output-error"
+  const isLoading = part.state === "input-available"
+
+  const output = isReady && typeof part.output === "object" ? (part.output as any) : null
+  const startups = output?.startups || []
+  const count = output?.count || startups.length
+  const timeframe = output?.timeframe || "past week"
+
+  const [copiedKey, setCopiedKey] = React.useState<string | null>(null)
+
+  const handleCopy = (text: string, key: string, label: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedKey(key)
+    toast.add({
+      title: "Copied to clipboard",
+      description: `${label} copied.`,
+      type: "success",
+    })
+    setTimeout(() => {
+      setCopiedKey((prev) => (prev === key ? null : prev))
+    }, 2000)
+  }
+
+  if (isLoading) {
+    return (
+      <div className="my-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5 flex items-center gap-3">
+        <Spinner className="size-4 text-primary shrink-0" />
+        <div className="text-xs">
+          <p className="font-medium text-foreground">Scouting live startup funding...</p>
+          <p className="text-muted-foreground text-[11px]">
+            Searching TechCrunch, PRNewswire, and venture rounds with Firecrawl.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="my-2 rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
+        Failed to scout startups: {part.errorText || "Unknown error"}
+      </div>
+    )
+  }
+
+  if (!isReady || startups.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="my-3 space-y-3">
+      <div className="flex items-center justify-between border-b pb-2">
+        <div className="flex items-center gap-2">
+          <div className="flex size-6 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Rocket className="size-3.5" />
+          </div>
+          <h4 className="text-xs font-semibold text-foreground">
+            Scouted {count} Startups ({timeframe === "48h" ? "Past 48 Hours" : "Past Week"})
+          </h4>
+        </div>
+        <Badge
+          variant="outline"
+          className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+        >
+          ✓ Firecrawl Verified
+        </Badge>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2.5">
+        {startups.map((s: any, idx: number) => {
+          const startupName = s.startupName || s.headline || "Startup"
+          const cleanDomain =
+            s.domain ||
+            (s.articleUrl ? s.articleUrl.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "") : "")
+          const fundingRound = s.fundingRound || "Seed"
+          const fundingAmount = s.fundingAmount || "Undisclosed"
+          const founderName = s.founderName || "Founder"
+          const founderRole = s.founderRole || "Leadership"
+          const linkedinUrl =
+            s.linkedinXrayUrl || (s.verifiedProfiles?.[0]?.linkedinUrl)
+          const verifiedEmail = s.verifiedEmail
+          const summary = s.productSummary || s.summary || s.description || ""
+          const isRumoured = Boolean(s.isRumoured)
+          const announcedDate = s.announcedDate || "This week"
+          const linkedinNote = s.linkedinNote || ""
+          const emailSubject = s.emailSubject || ""
+          const emailBody = s.emailBody || ""
+
+          return (
+            <div
+              key={idx}
+              className="rounded-xl border bg-card/70 p-3.5 space-y-2.5 shadow-xs transition-all hover:border-border"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-semibold text-sm text-foreground">
+                      {startupName}
+                    </span>
+                    {cleanDomain && (
+                      <a
+                        href={`https://${cleanDomain}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-muted-foreground hover:underline flex items-center gap-0.5 text-[11px]"
+                      >
+                        {cleanDomain}
+                        <ExternalLink className="size-2.5" />
+                      </a>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    <Badge variant="secondary" className="text-[10px]">
+                      {fundingRound} ({fundingAmount})
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] text-muted-foreground gap-0.5"
+                    >
+                      <Calendar className="size-2.5" />
+                      {announcedDate}
+                    </Badge>
+                    {isRumoured ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10"
+                      >
+                        ⚡ Rumour
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                      >
+                        ✓ Confirmed
+                      </Badge>
+                    )}
+                    {s.mxVerified && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                      >
+                        <CheckCircle2 className="size-2.5" />
+                        MX Verified
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                {onSendPrompt && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() =>
+                      onSendPrompt(
+                        `Tell me more about ${startupName} and draft a custom technical pitch for ${founderName}`
+                      )
+                    }
+                    className="text-[11px] gap-1 shrink-0 text-muted-foreground hover:text-primary cursor-pointer"
+                    title="Ask agent to deep-dive or write custom pitch"
+                  >
+                    <MessageSquare className="size-3" />
+                    Ask Agent
+                  </Button>
+                )}
+              </div>
+
+              {/* Product Description */}
+              {summary && (
+                <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
+                  {summary}
+                </p>
+              )}
+
+              {/* Founder & Contact Block */}
+              <div className="bg-muted/40 p-2.5 rounded-lg border text-xs flex flex-col gap-1.5">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-muted-foreground">Decision Maker:</span>
+                    <span className="font-medium text-foreground">{founderName}</span>
+                    <span className="text-muted-foreground text-[11px]">
+                      ({founderRole})
+                    </span>
+                  </div>
+                  {linkedinUrl && (
+                    <a
+                      href={linkedinUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline flex items-center gap-1 font-medium text-[11px] shrink-0"
+                    >
+                      Open LinkedIn Profile
+                      <ExternalLink className="size-2.5" />
+                    </a>
+                  )}
+                </div>
+
+                {verifiedEmail && (
+                  <div className="flex items-center justify-between border-t border-border/40 pt-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Email:</span>
+                      <code className="font-mono text-primary bg-primary/5 px-1 py-0.5 rounded text-[11px]">
+                        {verifiedEmail}
+                      </code>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopy(verifiedEmail, `em-${idx}`, "Email")
+                        }
+                        className="text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 text-[11px]"
+                      >
+                        {copiedKey === `em-${idx}` ? (
+                          <Check className="size-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="size-3" />
+                        )}
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Pitch Tabs */}
+              {(linkedinNote || emailBody) && (
+                <Tabs defaultValue="note" className="w-full">
+                  <TabsList className="h-6.5 w-full justify-start rounded-md bg-muted/60 p-0.5">
+                    {linkedinNote && (
+                      <TabsTrigger
+                        value="note"
+                        className="h-5.5 text-[11px] px-2"
+                      >
+                        LinkedIn Note
+                      </TabsTrigger>
+                    )}
+                    {emailBody && (
+                      <TabsTrigger
+                        value="email"
+                        className="h-5.5 text-[11px] px-2"
+                      >
+                        Cold Email Pitch
+                      </TabsTrigger>
+                    )}
+                  </TabsList>
+
+                  {linkedinNote && (
+                    <TabsContent value="note" className="mt-1.5 space-y-1">
+                      <div className="rounded-lg border bg-background p-2.5 text-xs text-foreground leading-relaxed flex flex-col justify-between">
+                        <span>{linkedinNote}</span>
+                        <div className="mt-2 flex items-center justify-between text-muted-foreground border-t pt-1.5 text-[10px]">
+                          <span>{linkedinNote.length}/280 chars</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopy(
+                                linkedinNote,
+                                `note-${idx}`,
+                                "LinkedIn Note"
+                              )
+                            }
+                            className="text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                          >
+                            {copiedKey === `note-${idx}` ? (
+                              <Check className="size-3 text-emerald-500" />
+                            ) : (
+                              <Copy className="size-3" />
+                            )}
+                            Copy Note
+                          </button>
+                        </div>
+                      </div>
+                    </TabsContent>
+                  )}
+
+                  {emailBody && (
+                    <TabsContent value="email" className="mt-1.5 space-y-1">
+                      <div className="rounded-lg border bg-background p-2.5 text-xs text-foreground space-y-1.5">
+                        <div className="flex items-center justify-between border-b pb-1">
+                          <span className="font-medium text-foreground">
+                            Subject: {emailSubject}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopy(
+                                `${emailSubject}\n\n${emailBody}`,
+                                `full-${idx}`,
+                                "Email Pitch"
+                              )
+                            }
+                            className="text-primary hover:underline flex items-center gap-1 font-medium text-[10px] cursor-pointer"
+                          >
+                            {copiedKey === `full-${idx}` ? (
+                              <Check className="size-3 text-emerald-500" />
+                            ) : (
+                              <Copy className="size-3" />
+                            )}
+                            Copy Full Email
+                          </button>
+                        </div>
+                        <p className="whitespace-pre-wrap text-muted-foreground text-[11px] leading-relaxed">
+                          {emailBody}
+                        </p>
+                      </div>
+                    </TabsContent>
+                  )}
+                </Tabs>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function StartupIntelToolPart({
+  part,
+  onSendPrompt,
+}: {
+  part: ToolUIPart
+  onSendPrompt?: (text: string) => void
+}) {
+  const isReady = part.state === "output-available"
+  const isError = part.state === "output-error"
+  const output = isReady && typeof part.output === "object" ? (part.output as any) : null
+
+  if (part.state === "input-available") {
+    return (
+      <div className="my-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5 flex items-center gap-3">
+        <Spinner className="size-4 text-primary shrink-0" />
+        <div className="text-xs">
+          <p className="font-medium text-foreground">
+            Scraping 360° company intelligence...
+          </p>
+          <p className="text-muted-foreground text-[11px]">
+            Reading live website, checking founder LinkedIn profiles, and testing email MX.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (isError || !output) return null
+
+  const founders = output.founders || []
+
+  return (
+    <div className="my-3 rounded-xl border bg-card/70 p-4 space-y-3 text-xs shadow-xs">
+      <div className="flex items-center justify-between border-b pb-2">
+        <div className="flex items-center gap-2">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Search className="size-3.5" />
+          </div>
+          <div>
+            <h4 className="font-semibold text-sm text-foreground">
+              {output.companyName}
+            </h4>
+            {output.domain && (
+              <a
+                href={`https://${output.domain}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-muted-foreground hover:underline flex items-center gap-1 text-[11px]"
+              >
+                {output.domain} <ExternalLink className="size-2.5" />
+              </a>
+            )}
+          </div>
+        </div>
+        <Badge variant="outline" className="text-[10px] text-primary bg-primary/10">
+          360° Intel Dossier
+        </Badge>
+      </div>
+
+      <div>
+        <span className="text-muted-foreground font-medium text-[11px] uppercase tracking-wider">
+          Product & Mission
+        </span>
+        <p className="text-foreground/90 mt-1 leading-relaxed text-xs">
+          {output.productSummary}
+        </p>
+      </div>
+
+      {founders.length > 0 && (
+        <div className="space-y-1.5 border-t pt-2">
+          <span className="text-muted-foreground font-medium text-[11px] uppercase tracking-wider">
+            Key Founders & Leadership
+          </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+            {founders.map((f: any, idx: number) => (
+              <div
+                key={idx}
+                className="bg-muted/40 p-2 rounded-lg border flex items-center justify-between"
+              >
+                <div>
+                  <p className="font-medium text-foreground">{f.name}</p>
+                  <p className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                    {f.role}
+                  </p>
+                </div>
+                {f.linkedinUrl && (
+                  <a
+                    href={f.linkedinUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline text-[11px] font-medium flex items-center gap-0.5 shrink-0"
+                  >
+                    LinkedIn <ExternalLink className="size-2.5" />
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {onSendPrompt && (
+        <div className="flex justify-end pt-1 border-t">
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() =>
+              onSendPrompt(
+                `Draft a high-converting cold email and LinkedIn note for ${output.companyName}`
+              )
+            }
+            className="cursor-pointer gap-1.5"
+          >
+            <Sparkles className="size-3 text-primary" />
+            Ask Agent to Draft Outreach
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Tool Part Dispatcher ─────────────────────────────────────────────────────
 
 function ToolPartRenderer({
@@ -418,6 +883,7 @@ function ToolPartRenderer({
   bots,
   selectedBotId,
   onSelectBotId,
+  onSendPrompt,
 }: {
   part: AnyToolPart
   messageId: string
@@ -425,6 +891,7 @@ function ToolPartRenderer({
   bots?: ChatBotOption[]
   selectedBotId?: string
   onSelectBotId?: (id: string) => void
+  onSendPrompt?: (text: string) => void
 }) {
   const key = `${messageId}-tool-${index}`
   const toolName = getToolName(part)
@@ -560,6 +1027,24 @@ function ToolPartRenderer({
     case "show_screen":
       return <ShowScreenToolPart key={key} part={part} />
 
+    case "sweep_funded_startups":
+      return (
+        <StartupLeadsToolPart
+          key={key}
+          part={part}
+          onSendPrompt={onSendPrompt}
+        />
+      )
+
+    case "get_startup_full_intel":
+      return (
+        <StartupIntelToolPart
+          key={key}
+          part={part}
+          onSendPrompt={onSendPrompt}
+        />
+      )
+
     default:
       // Fallback: generic collapsible tool display
       return (
@@ -640,6 +1125,20 @@ export function Chat({
     { transport }
   )
 
+  const sanitizedInitialMessages = React.useMemo(() => {
+    if (!initialMessages || initialMessages.length === 0) return []
+    const seen = new Set<string>()
+    const result: UIMessage[] = []
+    for (let i = initialMessages.length - 1; i >= 0; i--) {
+      const msg = initialMessages[i]
+      if (msg && msg.id && !seen.has(msg.id)) {
+        seen.add(msg.id)
+        result.unshift(msg)
+      }
+    }
+    return result
+  }, [initialMessages])
+
   if (isLoading) {
     return (
       <div className="flex h-full flex-1 items-center justify-center">
@@ -658,7 +1157,7 @@ export function Chat({
       selectedBotId={selectedBotId}
       onSelectBotId={setSelectedBotId}
       transport={transport}
-      initialMessages={initialMessages}
+      initialMessages={sanitizedInitialMessages}
     />
   )
 }
@@ -689,6 +1188,20 @@ function ChatContent({
     messages: initialMessages,
     resume: initialMessages.length > 0,
   })
+
+  const uniqueMessages = React.useMemo(() => {
+    if (!messages || messages.length === 0) return []
+    const seen = new Set<string>()
+    const result: UIMessage[] = []
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg && msg.id && !seen.has(msg.id)) {
+        seen.add(msg.id)
+        result.unshift(msg)
+      }
+    }
+    return result
+  }, [messages])
 
   const {
     isSpeaking,
@@ -979,6 +1492,29 @@ function ChatContent({
     transport.stopGeneration(chatId)
   }, [stopSpeaking, stop, transport, chatId])
 
+  const handleSubmitText = React.useCallback(
+    (text: string) => {
+      stopSpeaking()
+      if (!text.trim()) return
+
+      sendMessage(
+        { text: text.trim() },
+        {
+          metadata: {
+            selectedBotId: selectedBot?.id,
+            botName: selectedBot?.name,
+            botAvatar: selectedBot?.avatar,
+            botJob: selectedBot?.job,
+            botInstructions: selectedBot?.instructions ?? null,
+            sandboxId: selectedBot?.sandboxId ?? null,
+          },
+        }
+      )
+      setInput("")
+    },
+    [stopSpeaking, sendMessage, selectedBot]
+  )
+
   const handleSubmit = (message: PromptInputMessage) => {
     stopSpeaking()
     const text = message.text?.trim() || input.trim()
@@ -1004,23 +1540,69 @@ function ChatContent({
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="mx-auto w-full max-w-3xl">
-          {messages.length === 0 ? (
-            <ConversationEmptyState
-              title={
-                isGroup
-                  ? "Group Chat"
-                  : botName
-                    ? `Chat with ${botName}`
-                    : "Start a conversation"
-              }
-              description={
-                isGroup && selectedBot
-                  ? `Pick a bot and type a message below. Currently talking to ${selectedBot.name}.`
-                  : "Type a message below to begin chatting."
-              }
-            />
+          {uniqueMessages.length === 0 ? (
+            <div className="flex flex-col items-center">
+              <ConversationEmptyState
+                title={
+                  isGroup
+                    ? "Group Chat"
+                    : botName
+                      ? `Chat with ${botName}`
+                      : "Start a conversation"
+                }
+                description={
+                  isGroup && selectedBot
+                    ? `Pick a bot and type a message below. Currently talking to ${selectedBot.name}.`
+                    : "Your personal autonomous agent is ready. Ask anything or pick a quick radar action below."
+                }
+              />
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2 max-w-lg px-4">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  type="button"
+                  onClick={() =>
+                    handleSubmitText(
+                      "Find 5 AI startups funded in the past week with verified founder LinkedIn profiles."
+                    )
+                  }
+                  className="rounded-full text-xs gap-1.5 cursor-pointer bg-card/60 hover:bg-primary/10 hover:border-primary/40 shadow-2xs"
+                >
+                  <Rocket className="size-3 text-primary" />
+                  Scout AI Seed rounds this week
+                </Button>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  type="button"
+                  onClick={() =>
+                    handleSubmitText(
+                      "Find 4 tech startups rumoured or in talks to raise funding in the past week."
+                    )
+                  }
+                  className="rounded-full text-xs gap-1.5 cursor-pointer bg-card/60 hover:bg-primary/10 hover:border-primary/40 shadow-2xs"
+                >
+                  <Sparkles className="size-3 text-amber-500" />
+                  Find in-talks / rumoured raises
+                </Button>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  type="button"
+                  onClick={() =>
+                    handleSubmitText(
+                      "Give me full 360-degree intel, founders, and email deliverability for OpenRouter."
+                    )
+                  }
+                  className="rounded-full text-xs gap-1.5 cursor-pointer bg-card/60 hover:bg-primary/10 hover:border-primary/40 shadow-2xs"
+                >
+                  <Search className="size-3 text-blue-500" />
+                  Deep-dive company intel
+                </Button>
+              </div>
+            </div>
           ) : (
-            messages.map((message, messageIndex) => {
+            uniqueMessages.map((message, messageIndex) => {
               const meta = (
                 message as unknown as { metadata?: Record<string, unknown> }
               ).metadata
@@ -1028,7 +1610,7 @@ function ChatContent({
                 const targetBotName = (meta.botName as string) || "Teammate"
                 return (
                   <div
-                    key={message.id}
+                    key={`handoff-${message.id}-${messageIndex}`}
                     className="my-3 flex items-center justify-center"
                   >
                     <span className="flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3.5 py-1 text-xs font-medium text-foreground shadow-xs">
@@ -1057,7 +1639,10 @@ function ChatContent({
                 )
 
               return (
-                <Message from={message.role} key={message.id}>
+                <Message
+                  from={message.role}
+                  key={`msg-${message.id}-${messageIndex}`}
+                >
                   {isGroup && isAssistant ? (
                     <div className="flex w-full items-start gap-3">
                       <ChatAvatar
@@ -1095,6 +1680,7 @@ function ChatContent({
                                   bots={bots}
                                   selectedBotId={selectedBotId}
                                   onSelectBotId={onSelectBotId}
+                                  onSendPrompt={handleSubmitText}
                                 />
                               )
                             }
@@ -1197,6 +1783,7 @@ function ChatContent({
                                 bots={bots}
                                 selectedBotId={selectedBotId}
                                 onSelectBotId={onSelectBotId}
+                                onSendPrompt={handleSubmitText}
                               />
                             )
                           }
